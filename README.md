@@ -185,6 +185,11 @@ estate exists.
 make run
 ```
 
+For the step-by-step operator flow — onboarding an estate through the
+console, running the worker that consumes each queued command, and driving
+the full lifecycle to cutover — see
+[docs/RUNBOOK.md](data-migration-control-tower/docs/RUNBOOK.md).
+
 That drives the full lifecycle: discovery through planning, a deliberately
 seeded row-loss defect, memory-assisted investigation, deterministic
 remediation, re-validation, human approval and cutover.
