@@ -11,16 +11,17 @@ Fleet. Full design is in the master documentation this repo implements;
 day-by-day build order follows the Revised Master Schedule (16–31 Aug
 2026).
 
-This README currently covers **Day 1 (foundation)** through **Day 5**
-(the full six-agent fleet, DISCOVERED through COMPLETE), **Block C / Day
-6** (Agent Registry, Agent Identity, cross-department capability
-discovery), **Block C / Day 7** (Memory Bank, kill-and-resume
-durability, a labeled long-horizon fixture), **Block C / Day 8**
-(multimodal documentation-drift discovery, a fast PII pre-screen, and
-the guardrail/injection-defense corpus), and **Block C / Day 9** (the
-Control Tower UI). 21–23 Aug is the master doc's own blackout window
-(§17, Block B — no development scheduled); Day 6 picks up at the
-Mon-24-Aug agenda. The evaluation harness is the remaining later day.
+This README is the build log: what was added on each day, what it proves,
+and why specific decisions were made. It runs from **Day 1** (foundation)
+through the **six-agent fleet** (Day 5), the **Agent Registry and
+cross-department capability discovery** (Day 6), the **Memory Bank and
+kill-and-resume durability** (Day 7), **multimodal drift discovery and
+injection defense** (Day 8), the **Control Tower UI** (Day 9), the
+**evaluation harness and hardening phases** (Day 10), and **multi-estate
+portability** (Day 11 — the platform becomes plug-and-play).
+
+For a top-level overview — architecture, setup and the current shape of the
+system rather than how it got here — see the [repository README](../README.md).
 
 ## Prerequisites
 
@@ -818,18 +819,116 @@ confirmed real:
 **Evidence**: 6 new regression tests in `tests/test_orchestrator.py` —
 2 unit tests proving `_consume()` acks only on handler success and
 nacks (never acks) on a handler exception; 4 live-Firestore tests
-proving `_dedup_claim()`'s claimed/done/stale_claim states. Full suite:
-**224/224 passing**. A live `run_full_migration.py` run against real
+proving `_dedup_claim()`'s claimed/done/stale_claim states. Full suite at the time:
+**224/224 passing** (491 as of Day 11). A live `run_full_migration.py` run against real
 Pub/Sub/Firestore/SQL Server/BigQuery reached `COMPLETE` with every
 `processed_messages` doc from that run's chain at `status="done"` (none
-stuck `"claimed"`) and `wave_state/slots` cleanly released. See
+stuck `"claimed"`) and its wave slot cleanly released (that document became
+`wave_state/{estate_id}` in Day 11). See
 `docs/compliance_matrix.md`'s matching section for the full table.
+
+### Day 11 — multi-estate: the platform becomes plug-and-play
+
+Everything before this proved one estate end to end. This block made the
+estate a *parameter* rather than an assumption, so a second migration team
+can connect their own systems without the agent fleet changing.
+
+**What was hardcoded, and where it went.** The table each run migrated —
+`Sales.Customers`, its key column, its aggregate and null-check columns —
+lived as module constants imported by nine modules, including the
+orchestrator, the Validation agent, the cutover worker and the evaluation
+harness. They are gone. The Planner now derives targets from the discovered
+catalog plus the Migration Pack's type rules, writes them to
+`migration_plan/current`, and every consumer reads them from there.
+
+Derivation is deterministic and refuses to guess:
+
+- key column from `Table.primary_key`; a **composite** primary key blocks the
+  target with a stated reason, because the extractor orders by a single key
+  and reconciliation compares ordered key lists
+- aggregate column from the pack's declared numeric types; a table with none
+  records `aggregate_check: not_applicable` rather than comparing against a
+  fabricated zero
+- null-check column from column nullability, which required adding
+  `is_nullable` to the catalog — without it there was no non-fabricated way
+  to choose that column for a new estate
+
+**Estates became first-class.** `tools/estate_registry.py` backs
+`estates/{estate_id}` in Firestore with revision history, YAML import/export,
+and an `origin` guard: re-running `make seed` will not silently revert an
+estate an operator edited in the console. `tools/connection_context.py`
+resolves the registry first and committed YAML second, so an offline checkout
+still works.
+
+**Credentials became references.** `tools/secret_resolver.py` resolves a
+Secret Manager reference or a named environment variable at connect time,
+returning a type that redacts itself in `repr`. Two SQL Server estates can now
+be connected from one process — previously both would have taken their
+password from one process-global variable.
+
+*(The module is named `secret_resolver`, not `secrets`: Python puts a script's
+own directory on `sys.path`, so `tools/secrets.py` shadowed the standard
+library's `secrets` for any script under `tools/` — which broke
+`export_openapi.py`, since starlette does `from secrets import token_hex`.)*
+
+**State became estate-scoped.** `wave_state/slots` — a single global
+concurrency arena — became `wave_state/{estate_id}`. Without that split, a
+second onboarded customer's runs would queue behind, and be held by, the first
+customer's load. Connection health, run documents and every `/api/v1` read
+endpoint are scoped the same way, with one rule throughout: a record with **no**
+`estate_id` belongs to the default estate, never to nothing, so the dashboard
+does not empty out between deploying the filter and running the backfill.
+
+**Roles became estate-scoped.** Firebase custom claims carry
+`estate_roles`, and each mutating endpoint calls `authorize_estate()`
+explicitly — a FastAPI dependency cannot read an arbitrary request-body field.
+Because an explicit call is exactly what a new endpoint forgets, a test
+enumerates every mutating route and fails if one omits it.
+
+**The second estate.** A PostgreSQL fixture (`make second-estate`), a
+`PostgresAdapter`, a `postgres_retail_v1` pack and one line in `ADAPTER_TYPES`.
+Its pack declares no `scheduled_tables`, so every target is derived from
+discovered metadata — the path a real customer takes rather than the WWI path
+that reproduces pre-existing constants.
+
+`tests/test_clean_estate_onboarding.py` is the release gate (`make
+onboarding-gate`): it greps every file under `agents/` for `postgres`,
+`psycopg`, `retaildb` and the new estate and pack ids. Review cannot catch a
+single `if source ==` inside an agent; that grep can.
+
+**Also fixed, found by verifying rather than reasoning:**
+
+- Webpack emitted **relative** asset paths, so the first nested route
+  (`/estates/new`) requested its own JavaScript from `/estates/js/...`, hit the
+  SPA fallback, received `index.html` and never booted. Every prior route was a
+  single segment, so this had been invisible.
+- FastAPI's default 422 handler **echoes the rejected input**, so refusing a
+  submitted password returned it to the caller and any response-body log.
+- The wizard's hint text was nested inside `<label>`, folding it into each
+  control's accessible *name*.
+- The keyboard-navigation accessibility test passed serially and failed in
+  parallel — `page.keyboard.press` delivers to whatever the browser considers
+  focused, which is not the page when workers share a machine.
+
 
 ## Tests
 
 ```bash
-pytest tests/ -v
+make test
 ```
+
+491 backend tests, plus 21 component tests and 19 browser tests under
+`frontend/client` (`npm test`, `npm run test:e2e`). They run against live
+Firestore, so a test that creates a run or a registry card must delete it in
+teardown; suites needing SQL Server, Postgres or BigQuery skip automatically
+when those are unreachable.
+
+```bash
+make onboarding-gate
+```
+
+The clean-estate release gate: a second estate, a different database engine,
+with zero edits under `agents/`.
 
 ## Repository layout
 
