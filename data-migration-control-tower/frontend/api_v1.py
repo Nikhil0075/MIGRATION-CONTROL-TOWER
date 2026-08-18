@@ -9,6 +9,8 @@ import math
 import os
 import re
 import statistics
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Literal
 
@@ -58,15 +60,28 @@ class Availability(BaseModel):
     value: Any = None
 
 
+class ProgressSnapshot(BaseModel):
+    percent: int = Field(ge=0, le=100)
+    status: Literal["queued", "active", "waiting", "held", "failed", "complete"]
+    label: str
+    current_stage: str
+    completed_units: int = Field(ge=0)
+    total_units: int = Field(ge=1)
+    run_id: str | None = None
+    last_observed_at: str
+
+
 class StartAssessmentRequest(BaseModel):
     pack_id: str = Field(min_length=2, max_length=100)
-    estate_id: str = Field(default="wwi-demo-estate", min_length=2, max_length=100)
+    # Compatibility default for one release; the Redwood client always
+    # sends its selected estate explicitly.
+    estate_id: str = Field(default=DEFAULT_ESTATE_ID, min_length=2, max_length=100)
     justification: str = Field(min_length=8, max_length=2000)
 
 
 class StartRunRequest(BaseModel):
-    pipeline_id: str = Field(default="wwi.sales.customers", min_length=2, max_length=200)
-    execution_profile: Literal["wwi-default"] = "wwi-default"
+    pipeline_id: str = Field(min_length=2, max_length=200)
+    execution_profile: str = Field(default="wwi-default", min_length=2, max_length=100)
     estate_id: str = Field(default=DEFAULT_ESTATE_ID, min_length=2, max_length=100)
     justification: str = Field(min_length=8, max_length=2000)
 
@@ -135,10 +150,16 @@ class DeleteEstateRequest(BaseModel):
     justification: str = Field(min_length=8, max_length=2000)
 
 
+class EstateValidationRequest(BaseModel):
+    estate_id: str = Field(min_length=2, max_length=100, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    source: EstateSourceModel
+
+
 class WaveOverrideRequest(BaseModel):
     state: Literal["HOLD", "OPEN"]
     justification: str = Field(min_length=8, max_length=2000)
     expires_at: str | None = None
+    estate_id: str = Field(default=DEFAULT_ESTATE_ID, min_length=2, max_length=100)
 
 
 class ApproveV1Request(BaseModel):
@@ -154,6 +175,84 @@ def _envelope(data: Any, *, total: int | None = None, next_cursor: str | None = 
         "data": data,
         "meta": {"generated_at": _now(), "freshness": "live", "total": total, "next_cursor": next_cursor},
     }
+
+
+# ---------------------------------------------------------------------------
+# Read performance (Day 11 Phase 9)
+# ---------------------------------------------------------------------------
+#
+# Measured before this change, against 39 runs and 312 policy decisions:
+# /overview 54s, /policies 22s, /estates 8.4s. That is not data volume —
+# it is round trips. Both endpoints looped every run issuing one Firestore
+# query per subcollection per run, so ~78 sequential calls at roughly a
+# quarter-second each. The console polls on an interval, so every operator
+# sat behind that on every navigation.
+#
+# Two fixes, in order of effect:
+#   1. One collection_group() query instead of one query per run.
+#   2. A short TTL cache, surfaced honestly as meta.freshness == "cached"
+#      rather than pretending the number is live.
+
+# Sized against measured reality, not a guess. A single Firestore query
+# from a developer machine costs 0.5-1.2s of pure round trip, and a page
+# needs several, so a full pass over the console costs tens of seconds.
+# With a 5s TTL every poll and every navigation missed — the cache never
+# helped the case it exists for.
+#
+# 60s is chosen because migration-run state changes on the order of
+# minutes, the response is explicitly labelled `freshness: "cached"`, and
+# any write clears the cache so an operator always sees their own action
+# immediately. Set UI_CACHE_TTL_SECONDS=0 to disable entirely.
+_CACHE_TTL_SECONDS = float(os.environ.get("UI_CACHE_TTL_SECONDS", "60"))
+_response_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _cached(key: str, build) -> dict:
+    """Serves a recent response and SAYS so.
+
+    The envelope has always carried a `freshness` field with a "cached"
+    value; until now it was hardcoded to "live". A cached read is marked,
+    so the console can show it and nobody mistakes a five-second-old
+    number for a live one. Set UI_CACHE_TTL_SECONDS=0 to disable.
+    """
+    if _CACHE_TTL_SECONDS <= 0:
+        return build()
+    hit = _response_cache.get(key)
+    if hit and time.monotonic() < hit[0]:
+        payload = hit[1]
+        return {**payload, "meta": {**payload["meta"], "freshness": "cached"}}
+    value = build()
+    # Expiry is measured from when the build FINISHED, not when it started.
+    # Measuring from the start meant a build slower than the TTL stored an
+    # already-expired entry, so the most expensive endpoints — the only ones
+    # that needed caching — never got a hit.
+    _response_cache[key] = (time.monotonic() + _CACHE_TTL_SECONDS, value)
+    return value
+
+
+def clear_response_cache() -> None:
+    """Called after a write so an operator sees their own action immediately."""
+    _response_cache.clear()
+
+
+def _subcollection_group(name: str, run_ids: set[str] | None = None) -> dict[str, list[dict]]:
+    """Every run's `name` subcollection, in ONE round trip.
+
+    Replaces `for run in runs: _collection_docs(run, name)` — the N+1 that
+    made these endpoints take tens of seconds. Filtered in Python, never
+    with .where(): a collection_group plus an equality filter needs a
+    composite index this project does not create (CLAUDE.md).
+    """
+    grouped: dict[str, list[dict]] = {}
+    for doc in get_client().collection_group(name).stream():
+        parent = doc.reference.parent.parent
+        if parent is None:
+            continue
+        run_id = parent.id
+        if run_ids is not None and run_id not in run_ids:
+            continue
+        grouped.setdefault(run_id, []).append({"_id": doc.id, **(doc.to_dict() or {})})
+    return grouped
 
 
 def _collection_docs(run_id: str, name: str, limit: int | None = None) -> list[dict]:
@@ -200,6 +299,123 @@ def _for_estate(records: list[dict], estate_id: str | None) -> list[dict]:
 
 def _latest_run(runs: list[dict], *, mode: str | None = None) -> dict | None:
     return next((run for run in runs if mode is None or run.get("mode") == mode), None)
+
+
+EXECUTION_STAGES = [
+    "REQUESTED", "DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED",
+    "MIGRATING", "VALIDATING", "PASSED", "READY_FOR_APPROVAL", "APPROVED",
+    "CUTOVER", "MONITORING", "COMPLETE",
+]
+ASSESSMENT_STAGES = EXECUTION_STAGES[:5]
+VALIDATION_FAILURE_STAGES = {"FAILED", "INVESTIGATING", "REMEDIATING"}
+STAGE_LABELS = {
+    "REQUESTED": "Request queued",
+    "DISCOVERED": "Source metadata discovered",
+    "ANALYZED": "Dependencies analyzed",
+    "RISK_ASSESSED": "Risk assessment complete",
+    "PLANNED": "Migration plan ready",
+    "MIGRATING": "Migrating scheduled tables",
+    "VALIDATING": "Validating migrated data",
+    "FAILED": "Validation failed",
+    "INVESTIGATING": "Investigating validation failure",
+    "REMEDIATING": "Applying remediation",
+    "PASSED": "Validation passed",
+    "READY_FOR_APPROVAL": "Waiting for cutover approval",
+    "APPROVED": "Cutover approved",
+    "CUTOVER": "Cutover in progress",
+    "MONITORING": "Post-cutover monitoring",
+    "COMPLETE": "Migration complete",
+}
+
+
+def _run_progress(run: dict) -> dict:
+    """Measured lifecycle progress derived only from durable milestones."""
+    run_id = run.get("run_id") or run.get("_id")
+    stage = str(run.get("state") or "REQUESTED")
+    stages = ASSESSMENT_STAGES if run.get("mode") == "assessment" else EXECUTION_STAGES
+    measured_stage = "VALIDATING" if stage in VALIDATION_FAILURE_STAGES else stage
+    try:
+        completed = stages.index(measured_stage)
+    except ValueError:
+        completed = 0
+    percent = round(100 * completed / max(1, len(stages) - 1))
+
+    # A table-job ratio refines only the MIGRATING milestone. It never
+    # claims governance/cutover completion simply because rows were copied.
+    if stage == "MIGRATING" and run_id and len(stages) > completed + 1:
+        plans = _collection_docs(run_id, "migration_plan")
+        jobs = _collection_docs(run_id, "migration_executions")
+        total_jobs = sum(1 for item in plans if item.get("scheduled") and not item.get("blocked"))
+        done_jobs = sum(1 for item in jobs if item.get("status") in {"COMPLETE", "SUCCEEDED", "DONE"})
+        if total_jobs:
+            segment = 100 / (len(stages) - 1)
+            percent = round(min(100, percent + segment * min(done_jobs, total_jobs) / total_jobs))
+
+    if stage == stages[-1]:
+        progress_status = "complete"
+    elif stage in VALIDATION_FAILURE_STAGES:
+        progress_status = "failed" if stage == "FAILED" else "active"
+    elif stage == "READY_FOR_APPROVAL":
+        progress_status = "waiting"
+    elif run.get("wave_status") == "HOLD" or run.get("status") == "held":
+        progress_status = "held"
+    else:
+        progress_status = "active"
+    observed = (
+        run.get("last_transition_at")
+        or ((run.get("state_history") or [{}])[-1].get("at"))
+        or run.get("updated_at")
+        or run.get("created_at")
+        or _now()
+    )
+    return ProgressSnapshot(
+        percent=percent,
+        status=progress_status,
+        label=STAGE_LABELS.get(stage, stage.replace("_", " ").title()),
+        current_stage=stage,
+        completed_units=completed,
+        total_units=len(stages) - 1,
+        run_id=run_id,
+        last_observed_at=str(observed),
+    ).model_dump()
+
+
+def _attach_progress(run: dict) -> dict:
+    return {**run, "progress": _run_progress(run)}
+
+
+def _operation_progress(operation: dict) -> dict:
+    run_id = operation.get("run_id") or (operation.get("result") or {}).get("run_id")
+    if run_id:
+        try:
+            return _run_progress(get_run(run_id))
+        except KeyError:
+            pass
+    status_value = str(operation.get("status") or "queued")
+    terminal_failed = status_value in {"failed", "publish_failed"}
+    return ProgressSnapshot(
+        percent=0,
+        status="failed" if terminal_failed else "queued",
+        label=("Operation failed" if terminal_failed else "Waiting for a worker"),
+        current_stage="REQUESTED",
+        completed_units=0,
+        total_units=4 if operation.get("kind") == "assessment.start" else 12,
+        run_id=run_id,
+        last_observed_at=str(operation.get("updated_at") or operation.get("created_at") or _now()),
+    ).model_dump()
+
+
+def _authorize_read(user: UserContext, estate_id: str | None) -> None:
+    if estate_id:
+        authorize_estate(user, estate_id, "viewer")
+
+
+def _visible_estate_ids(user: UserContext) -> set[str]:
+    return {
+        str(estate.get("estate_id"))
+        for estate in _all_estates()
+        if estate.get("estate_id") and user.has_role("viewer", str(estate.get("estate_id")))
+    }
 
 
 def _wave_state(estate_id: str | None = None) -> dict:
@@ -423,6 +639,8 @@ def _sanitized_estate(estate: dict, latest: dict | None = None) -> dict:
             {
                 "source_id": source["source_id"],
                 "adapter": source["adapter"],
+                "pack_id": source.get("pack_id"),
+                "execution_profiles": source.get("execution_profiles") or ([source.get("pack_id")] if source.get("pack_id") else []),
                 "connection": None
                 if profile is None
                 else {
@@ -446,6 +664,10 @@ def _sanitized_estate(estate: dict, latest: dict | None = None) -> dict:
         "target": estate.get("target"),
         "objects": len(catalog),
         "pipelines": len(pipelines),
+        "pipeline_options": [
+            {"pipeline_id": item.get("pipeline_id"), "name": item.get("name") or item.get("pipeline_id")}
+            for item in pipelines if item.get("pipeline_id")
+        ],
         "latest_run_id": (latest or {}).get("run_id"),
         "last_run_at": (latest or {}).get("created_at"),
     }
@@ -459,6 +681,8 @@ def runtime_config() -> dict:
             "product_name": "Migration Control Tower",
             "build_version": os.environ.get("BUILD_VERSION", "development"),
             "poll_interval_ms": 10_000,
+            "progress_poll_interval_ms": 2_000,
+            "environment": os.environ.get("APP_ENVIRONMENT") or os.environ.get("ENVIRONMENT") or "Local",
             "firebase": firebase_config,
             "authentication_configured": bool(firebase_config),
         }
@@ -467,22 +691,93 @@ def runtime_config() -> dict:
 
 @public_router.get("/session", response_model=Envelope)
 def session(user: UserContext = Depends(get_user_context)) -> dict:
-    return _envelope({"uid": user.uid, "email": user.email, "roles": sorted(user.roles)})
+    grants = {estate: sorted(roles) for estate, roles in (user.estate_roles or {}).items()}
+    return _envelope({
+        "uid": user.uid,
+        "email": user.email,
+        "roles": sorted(user.roles),
+        "estate_roles": grants,
+        "wildcard_roles": grants.get("*", []),
+        "scoped_estates": user.scoped_estates,
+    })
 
 
 @router.get("/overview", response_model=Envelope)
-def overview(estate_id: str | None = Query(default=None)) -> dict:
+def overview(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    _authorize_read(user, estate_id)
+    return _cached(f"overview:{estate_id}", lambda: _build_overview(estate_id))
+
+
+def _build_overview(estate_id: str | None) -> dict:
+    """Overview reads ten independent things from Firestore.
+
+    Issued sequentially this took ~21s: the data is tiny (tens of
+    documents) but each round trip costs a second or more, and they were
+    serialised for no reason — none of them depends on another's result
+    except the four keyed on the latest run.
+
+    Run concurrently the endpoint costs roughly its slowest single query.
+    The Firestore client is safe to share across threads, and every task
+    here is a read.
+    """
     runs = _all_runs(200, estate_id=estate_id)
     latest = _latest_run(runs)
+    latest_run_id = latest["run_id"] if latest else None
     client = get_client()
-    operations = [d.to_dict() or {} for d in client.collection("operation_requests").limit(100).stream()]
-    connection_snapshots = [d.to_dict() or {} for d in client.collection("connection_health").stream()]
-    decisions = [d.to_dict() or {} for d in client.collection_group("policy_decisions").stream()]
-    findings = _collection_docs(latest["run_id"], "risk_findings") if latest else []
-    executions = _collection_docs(latest["run_id"], "migration_executions") if latest else []
-    incidents = _collection_docs(latest["run_id"], "incidents") if latest else []
-    approvals = _collection_docs(latest["run_id"], "approval_history") if latest else []
-    wave_state = _wave_state(estate_id)
+
+    def _operations():
+        return _for_estate(
+            [d.to_dict() or {} for d in client.collection("operation_requests").limit(100).stream()],
+            estate_id,
+        )
+
+    def _connection_snapshots():
+        snapshots = []
+        for snapshot in client.collection("connection_health").stream():
+            value = snapshot.to_dict() or {}
+            belongs = value.get("estate_id") or (
+                snapshot.id.split("__", 1)[0] if "__" in snapshot.id else DEFAULT_ESTATE_ID
+            )
+            if not estate_id or belongs == estate_id:
+                snapshots.append(value)
+        return snapshots
+
+    def _decisions():
+        return [
+            item
+            for items in _subcollection_group(
+                "policy_decisions", {r["run_id"] for r in runs}
+            ).values()
+            for item in items
+        ]
+
+    def _latest_sub(name):
+        return lambda: _collection_docs(latest_run_id, name) if latest_run_id else []
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {
+            "operations": pool.submit(_operations),
+            "connections": pool.submit(_connection_snapshots),
+            "decisions": pool.submit(_decisions),
+            "findings": pool.submit(_latest_sub("risk_findings")),
+            "executions": pool.submit(_latest_sub("migration_executions")),
+            "incidents": pool.submit(_latest_sub("incidents")),
+            "approvals": pool.submit(_latest_sub("approval_history")),
+            "wave_state": pool.submit(lambda: _wave_state(estate_id)),
+        }
+        resolved = {name: future.result() for name, future in futures.items()}
+
+    operations = resolved["operations"]
+    connection_snapshots = resolved["connections"]
+    decisions = resolved["decisions"]
+    findings = resolved["findings"]
+    executions = resolved["executions"]
+    incidents = resolved["incidents"]
+    approvals = resolved["approvals"]
+    wave_state = resolved["wave_state"]
     latest_execution = executions[-1] if executions else None
     progress = None
     if latest_execution and latest_execution.get("source_count"):
@@ -501,8 +796,9 @@ def overview(estate_id: str | None = Query(default=None)) -> dict:
                 "total": len(runs),
                 "active": sum(1 for run in runs if run.get("state") not in {"COMPLETE", "PASSED"}),
                 "complete": sum(1 for run in runs if run.get("state") == "COMPLETE"),
-                "latest": latest,
+                "latest": _attach_progress(latest) if latest else None,
                 "migrated_percent": progress,
+                "row_transfer_percent": progress,
             },
             "waves": {
                 "running_by_source": wave_state.get("running_by_source", {}),
@@ -531,7 +827,10 @@ def overview(estate_id: str | None = Query(default=None)) -> dict:
 
 
 @router.get("/estates", response_model=Envelope)
-def estates(estate_id: str | None = Query(default=None)) -> dict:
+def estates(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
     """Every registered estate, not a hardcoded list of one.
 
     Each estate is summarised against its OWN most recent run. Using the
@@ -539,8 +838,19 @@ def estates(estate_id: str | None = Query(default=None)) -> dict:
     zero objects for every estate except whichever one happened to run
     most recently.
     """
+    _authorize_read(user, estate_id)
+    # Keyed by the caller's own visibility as well as the filter: two users
+    # with different estate grants must never share a cached response.
+    scope = ",".join(sorted(user.estate_roles or {})) or "*"
+    return _cached(f"estates:{estate_id}:{scope}", lambda: _build_estates(estate_id, user))
+
+
+def _build_estates(estate_id: str | None, user: UserContext) -> dict:
     runs = _all_runs(500)
-    documents = _all_estates()
+    documents = [
+        estate for estate in _all_estates()
+        if user.has_role("viewer", str(estate.get("estate_id")))
+    ]
     if estate_id is not None:
         documents = [e for e in documents if e.get("estate_id") == estate_id]
     summaries = [
@@ -568,9 +878,10 @@ def adapter_types() -> dict:
 
 
 @router.get("/estates/{estate_id}", response_model=Envelope)
-def estate_detail(estate_id: str) -> dict:
+def estate_detail(estate_id: str, user: UserContext = Depends(get_user_context)) -> dict:
     from tools.connection_context import EstateNotFound
 
+    authorize_estate(user, estate_id, "viewer")
     try:
         estate = _estate(estate_id)
     except EstateNotFound as exc:
@@ -708,8 +1019,6 @@ def validate_source_connection(
     silently running on the local-dev environment fallback instead of
     Secret Manager is visible rather than looking like success.
     """
-    from tools.adapters import build_adapter_for_binding
-    from tools.adapters.base import AdapterCapabilityNotSupported
     from tools.connection_context import (
         EstateNotFound,
         SourceNotFound,
@@ -723,47 +1032,83 @@ def validate_source_connection(
     except (EstateNotFound, SourceNotFound) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    return _envelope(_validate_binding(binding))
+
+
+def _validate_binding(binding: Any) -> dict:
+    """Credential-safe live probe shared by persisted and wizard validation."""
+    from tools.adapters import build_adapter_for_binding
+    from tools.adapters.base import AdapterCapabilityNotSupported
+
     if not binding.requires_connection:
-        return _envelope({
+        return {
             "status": "NOT_APPLICABLE",
             "detail": (
-                f"Source {source_id!r} is a static-file source with no live server "
-                f"to connect to; nothing to validate."
+                f"Source {binding.source_id!r} is a static-file source with no live server "
+                "to connect to; nothing to validate."
             ),
             "object_count": None,
             "latency_ms": 0,
-        })
-
+        }
     try:
-        adapter = build_adapter_for_binding(binding)
-        result = adapter.health_check()
+        result = build_adapter_for_binding(binding).health_check()
     except AdapterCapabilityNotSupported as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 — a failed probe is a result, not a 500
-        return _envelope({
+    except Exception as exc:  # noqa: BLE001 — an unreachable source is an expected probe result
+        return {
             "status": "UNREACHABLE",
             "detail": f"{type(exc).__name__}: {exc}",
             "object_count": None,
             "latency_ms": None,
-        })
-
-    return _envelope({
+        }
+    return {
         "status": result.get("status"),
         "detail": result.get("detail"),
         "object_count": result.get("object_count"),
         "latency_ms": result.get("latency_ms"),
         "last_observed_at": result.get("last_observed_at"),
-    })
+    }
+
+
+@router.post("/estate-validations", response_model=Envelope)
+def validate_transient_estate_source(
+    body: EstateValidationRequest,
+    user: UserContext = Depends(require_role("operator")),
+) -> dict:
+    """Validate connection references before the estate is persisted."""
+    from tools.connection_context import binding_from_estate
+
+    authorize_estate(user, body.estate_id, "operator")
+    source = body.source.model_dump(exclude_none=True)
+    binding = binding_from_estate(
+        {"estate_id": body.estate_id, "sources": [source]}, source["source_id"]
+    )
+    return _envelope(_validate_binding(binding))
 
 
 @router.get("/assessments", response_model=Envelope)
-def assessments(estate_id: str | None = Query(default=None)) -> dict:
+def assessments(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    _authorize_read(user, estate_id)
     runs = [run for run in _all_runs(200, estate_id=estate_id) if run.get("mode") == "assessment"]
-    return _envelope({"runs": runs, "packs": _packs()}, total=len(runs))
+    estate = _estate(estate_id) if estate_id else None
+    allowed_pack_ids = {source.get("pack_id") for source in (estate or {}).get("sources", []) if source.get("pack_id")}
+    packs = [pack for pack in _packs() if not allowed_pack_ids or pack.get("pack_id") in allowed_pack_ids]
+    return _envelope({"runs": [_attach_progress(run) for run in runs], "packs": packs}, total=len(runs))
 
 
 @router.get("/waves", response_model=Envelope)
-def waves(estate_id: str | None = Query(default=None)) -> dict:
+def waves(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    _authorize_read(user, estate_id)
+    return _cached(f"waves:{estate_id}", lambda: _build_waves(estate_id))
+
+
+def _build_waves(estate_id: str | None) -> dict:
     client = get_client()
     wave_state = _wave_state(estate_id)
     events = [d.to_dict() or {} for d in client.collection("wave_events").limit(200).stream()]
@@ -773,6 +1118,11 @@ def waves(estate_id: str | None = Query(default=None)) -> dict:
         for d in client.collection("operation_requests").limit(200).stream()
         if (d.to_dict() or {}).get("status") in {"queued", "published", "publish_failed"}
     ]
+    if estate_id:
+        prefix = f"{estate_id}:"
+        events = [item for item in events if str(item.get("source_id", "")).startswith(prefix)]
+        overrides = [item for item in overrides if str(item.get("source_id", "")).startswith(prefix)]
+        operations = _for_estate(operations, estate_id)
     now = dt.datetime.now(dt.timezone.utc)
     for operation in operations:
         observed = _parsed_time(operation.get("created_at"))
@@ -801,8 +1151,15 @@ def runs(
     estate_id: str | None = Query(default=None),
     search: str | None = None,
     sort: Literal["created_at_desc", "created_at_asc"] = "created_at_desc",
+    user: UserContext = Depends(get_user_context),
 ) -> dict:
-    items = _all_runs(500, estate_id=estate_id)
+    _authorize_read(user, estate_id)
+    # Only the Firestore read is cached; filtering, sorting and paging stay
+    # live so a changed query never returns a stale page.
+    items = _cached(f"runs-source:{estate_id}", lambda: _envelope(_all_runs(500, estate_id=estate_id)))["data"]
+    if estate_id is None:
+        visible = _visible_estate_ids(user)
+        items = [run for run in items if (run.get("estate_id") or DEFAULT_ESTATE_ID) in visible]
     if state_filter:
         items = [run for run in items if run.get("state") == state_filter]
     if mode:
@@ -813,17 +1170,18 @@ def runs(
     if sort == "created_at_asc":
         items.reverse()
     offset = _decode_cursor(cursor)
-    page = items[offset : offset + limit]
+    page = [_attach_progress(run) for run in items[offset : offset + limit]]
     next_cursor = _encode_cursor(offset + limit) if offset + limit < len(items) else None
     return _envelope(page, total=len(items), next_cursor=next_cursor)
 
 
 @router.get("/runs/{run_id}", response_model=Envelope)
-def run_detail(run_id: str) -> dict:
+def run_detail(run_id: str, user: UserContext = Depends(get_user_context)) -> dict:
     try:
         run = get_run(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    authorize_estate(user, run.get("estate_id") or DEFAULT_ESTATE_ID, "viewer")
     collections = (
         "stage_metrics",
         "migration_plan",
@@ -838,11 +1196,22 @@ def run_detail(run_id: str) -> dict:
         "containment_events",
     )
     detail = {name: _collection_docs(run_id, name) for name in collections}
-    return _envelope({"run": run, **detail})
+    return _envelope({"run": _attach_progress(run), **detail})
 
 
 @router.get("/lineage", response_model=Envelope)
-def lineage(run_id: str | None = None, estate_id: str | None = Query(default=None)) -> dict:
+def lineage(
+    run_id: str | None = None,
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    _authorize_read(user, estate_id)
+    if run_id:
+        try:
+            selected_run = get_run(run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        authorize_estate(user, selected_run.get("estate_id") or DEFAULT_ESTATE_ID, "viewer")
     selected = run_id or ((_latest_run(_all_runs(50, estate_id=estate_id)) or {}).get("run_id"))
     if not selected:
         return _envelope({"run_id": None, "nodes": [], "edges": []})
@@ -877,43 +1246,80 @@ def lineage(run_id: str | None = None, estate_id: str | None = Query(default=Non
 def reconciliation(
     limit: int = Query(default=200, ge=1, le=500),
     estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
 ) -> dict:
-    rows = []
-    for run in _all_runs(100, estate_id=estate_id):
-        for check in _collection_docs(run["run_id"], "reconciliation"):
-            rows.append({"run_id": run["run_id"], "pipeline_id": run.get("pipeline_id"), **check})
-            if len(rows) >= limit:
-                return _envelope(rows, total=len(rows))
-    return _envelope(rows, total=len(rows))
+    _authorize_read(user, estate_id)
+
+    def _build() -> dict:
+        runs = _all_runs(100, estate_id=estate_id)
+        pipeline_by_run = {run["run_id"]: run.get("pipeline_id") for run in runs}
+        by_run = _subcollection_group("reconciliation", set(pipeline_by_run))
+        rows = [
+            {"run_id": run_id, "pipeline_id": pipeline_by_run.get(run_id), **check}
+            for run_id, checks in by_run.items()
+            for check in checks
+        ]
+        return _envelope(rows[:limit], total=min(len(rows), limit))
+
+    return _cached(f"reconciliation:{estate_id}:{limit}", _build)
 
 
 @router.get("/policies", response_model=Envelope)
-def policies(estate_id: str | None = Query(default=None)) -> dict:
-    client = get_client()
-    decisions = [d.to_dict() or {} for d in client.collection_group("policy_decisions").stream()]
-    approvals = []
-    for run in _all_runs(100, estate_id=estate_id):
-        approvals.extend({"run_id": run["run_id"], **item} for item in _collection_docs(run["run_id"], "approval_history"))
-    decisions.sort(key=lambda item: item.get("decided_at", ""), reverse=True)
-    approvals.sort(key=lambda item: item.get("recorded_at", ""), reverse=True)
-    return _envelope({"decisions": decisions[:500], "approvals": approvals[:500]})
+def policies(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    _authorize_read(user, estate_id)
+
+    def _build() -> dict:
+        runs = _all_runs(100, estate_id=estate_id)
+        run_ids = {run["run_id"] for run in runs}
+        # Two collection_group queries, not two per run.
+        by_run_decisions = _subcollection_group("policy_decisions", run_ids)
+        by_run_approvals = _subcollection_group("approval_history", run_ids)
+
+        decisions = [
+            {"run_id": run_id, **item}
+            for run_id, items in by_run_decisions.items()
+            for item in items
+        ]
+        approvals = [
+            {"run_id": run_id, **item}
+            for run_id, items in by_run_approvals.items()
+            for item in items
+        ]
+        decisions.sort(key=lambda item: item.get("decided_at", ""), reverse=True)
+        approvals.sort(key=lambda item: item.get("recorded_at", ""), reverse=True)
+        return _envelope({"decisions": decisions[:500], "approvals": approvals[:500]})
+
+    return _cached(f"policies:{estate_id}", _build)
 
 
 @router.get("/agents", response_model=Envelope)
-def agents() -> dict:
+def agents(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    _authorize_read(user, estate_id)
     cards = [doc.to_dict() or {} for doc in get_client().collection_group("versions").stream()]
     cards.sort(key=lambda item: (item.get("agent_id", ""), item.get("version", "")))
     pinned: dict[str, int] = {}
-    for run in _all_runs(200):
+    for run in _all_runs(200, estate_id=estate_id):
         for agent_id in (run.get("pinned_agents") or {}):
             pinned[agent_id] = pinned.get(agent_id, 0) + 1
     return _envelope({"cards": cards, "pinned_run_counts": pinned}, total=len(cards))
 
 
 @router.get("/evaluations", response_model=Envelope)
-def evaluations() -> dict:
+def evaluations(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    _authorize_read(user, estate_id)
     client = get_client()
     evaluation_runs = [d.to_dict() or {} for d in client.collection("evaluation_runs").limit(100).stream()]
+    if estate_id:
+        evaluation_runs = [item for item in evaluation_runs if (item.get("estate_id") or DEFAULT_ESTATE_ID) == estate_id]
     scale_snapshot = client.collection("evaluation_scale_reports").document("current").get()
     scale_metrics = scale_snapshot.to_dict() if scale_snapshot.exists else None
     return _envelope(
@@ -927,11 +1333,24 @@ def evaluations() -> dict:
 
 
 @router.get("/system-health", response_model=Envelope)
-def system_health() -> dict:
+def system_health(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    _authorize_read(user, estate_id)
+    return _cached(f"system-health:{estate_id}", lambda: _build_system_health(estate_id))
+
+
+def _build_system_health(estate_id: str | None) -> dict:
     client = get_client()
-    latest = _latest_run(_all_runs(10))
+    latest = _latest_run(_all_runs(10, estate_id=estate_id))
     processed = [d.to_dict() or {} for d in client.collection("processed_messages").limit(100).stream()]
-    connections = [d.to_dict() or {} for d in client.collection("connection_health").stream()]
+    connections = []
+    for snapshot in client.collection("connection_health").stream():
+        value = snapshot.to_dict() or {}
+        belongs = value.get("estate_id") or (snapshot.id.split("__", 1)[0] if "__" in snapshot.id else DEFAULT_ESTATE_ID)
+        if not estate_id or belongs == estate_id:
+            connections.append(value)
     services = [
         {"service": "Firestore", "status": "HEALTHY", "last_observed_at": _now(), "detail": "Read succeeded"},
         {
@@ -971,6 +1390,96 @@ def system_health() -> dict:
     return _envelope({"services": services, "build_version": os.environ.get("BUILD_VERSION", "development")})
 
 
+@router.get("/operations/{operation_id}", response_model=Envelope)
+def operation_status(
+    operation_id: str,
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    snapshot = get_client().collection("operation_requests").document(operation_id).get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Operation not found.")
+    operation = {"operation_id": snapshot.id, **(snapshot.to_dict() or {})}
+    estate_id = operation.get("estate_id") or (operation.get("event") or {}).get("estate_id")
+    if operation.get("actor") != user.email:
+        if not estate_id:
+            raise HTTPException(status_code=403, detail="This operation is not visible to the signed-in user.")
+        authorize_estate(user, estate_id, "viewer")
+    progress = _operation_progress(operation)
+    return _envelope({**operation, "estate_id": estate_id, "run_id": progress.get("run_id"), "progress": progress})
+
+
+@router.get("/search", response_model=Envelope)
+def search_console(
+    q: str = Query(min_length=1, max_length=120),
+    estate_id: str = Query(min_length=2, max_length=100),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    authorize_estate(user, estate_id, "viewer")
+    term = q.strip().lower()
+    results: list[dict] = []
+    estate = _estate(estate_id)
+    if term in f"{estate_id} {estate.get('display_name', '')}".lower():
+        results.append({
+            "id": estate_id, "kind": "estate", "title": estate.get("display_name", estate_id),
+            "subtitle": estate_id, "route": "/estates",
+        })
+    for run in _all_runs(100, estate_id=estate_id):
+        haystack = f"{run.get('run_id', '')} {run.get('pipeline_id', '')} {run.get('state', '')}".lower()
+        if term in haystack:
+            results.append({
+                "id": run.get("run_id"), "kind": "run", "title": run.get("run_id"),
+                "subtitle": f"{run.get('pipeline_id', 'Assessment')} · {run.get('state', 'UNKNOWN')}",
+                "route": f"/runs/{run.get('run_id')}",
+            })
+        if len(results) >= 20:
+            break
+    return _envelope(results, total=len(results))
+
+
+@router.get("/notifications", response_model=Envelope)
+def notifications(
+    estate_id: str = Query(min_length=2, max_length=100),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    authorize_estate(user, estate_id, "viewer")
+    now = dt.datetime.now(dt.timezone.utc)
+    items: list[dict] = []
+    operations = _for_estate(
+        [doc.to_dict() or {} for doc in get_client().collection("operation_requests").limit(200).stream()],
+        estate_id,
+    )
+    for operation in operations:
+        status_value = operation.get("status")
+        observed = _parsed_time(operation.get("updated_at") or operation.get("created_at"))
+        is_stale = status_value in {"queued", "published"} and observed and now - observed > dt.timedelta(minutes=30)
+        if status_value in {"failed", "publish_failed"} or is_stale:
+            items.append({
+                "id": operation.get("operation_id"),
+                "kind": "operation",
+                "severity": "critical" if status_value in {"failed", "publish_failed"} else "warning",
+                "title": "Operation failed" if status_value in {"failed", "publish_failed"} else "Operation is stale",
+                "detail": operation.get("error") or operation.get("kind") or "No recent worker update.",
+                "status": status_value,
+                "observed_at": operation.get("updated_at") or operation.get("created_at"),
+                "route": "/system-health",
+            })
+    for run in _all_runs(100, estate_id=estate_id):
+        if run.get("state") in VALIDATION_FAILURE_STAGES | {"READY_FOR_APPROVAL"}:
+            pending = run.get("state") == "READY_FOR_APPROVAL"
+            items.append({
+                "id": run.get("run_id"),
+                "kind": "approval" if pending else "run",
+                "severity": "info" if pending else "critical",
+                "title": "Cutover approval required" if pending else STAGE_LABELS.get(run.get("state"), "Run needs attention"),
+                "detail": run.get("pipeline_id") or run.get("pack_id") or run.get("run_id"),
+                "status": run.get("state"),
+                "observed_at": run.get("last_transition_at") or run.get("created_at"),
+                "route": f"/runs/{run.get('run_id')}",
+            })
+    items.sort(key=lambda item: item.get("observed_at") or "", reverse=True)
+    return _envelope(items[:100], total=len(items))
+
+
 def _record_estate_operation(
     *, user: UserContext, kind: str, key: str, justification: str, estate_id: str
 ) -> None:
@@ -986,6 +1495,8 @@ def _record_estate_operation(
     import uuid as _uuid
 
     from frontend.operations import _operation_id, _validated_key
+
+    clear_response_cache()
 
     try:
         validated = _validated_key(key)
@@ -1024,6 +1535,9 @@ def _record_estate_operation(
 def _queue(
     *, user: UserContext, kind: str, key: str, justification: str, topic: str, event: dict
 ) -> dict:
+    # An operator must see the effect of their own action immediately,
+    # rather than waiting out the read cache.
+    clear_response_cache()
     try:
         operation = queue_operation(
             actor=user.email,
@@ -1116,9 +1630,8 @@ def wave_override(
     idempotency_key: str = Header(alias="Idempotency-Key"),
     user: UserContext = Depends(require_role("operator")),
 ) -> dict:
-    from tools.wave_manager import estate_of
-
-    authorize_estate(user, estate_of(source_id), "operator")
+    authorize_estate(user, body.estate_id, "operator")
+    wave_key = f"{body.estate_id}:{source_id}"
     if body.expires_at:
         try:
             expires = dt.datetime.fromisoformat(body.expires_at)
@@ -1134,12 +1647,12 @@ def wave_override(
         key=idempotency_key,
         justification=body.justification,
         topic="wave.override.requested",
-        event={"source_id": source_id, "state": body.state, "expires_at": body.expires_at},
+        event={"source_id": wave_key, "estate_id": body.estate_id, "state": body.state, "expires_at": body.expires_at},
     )
     if operation["data"].get("idempotent_replay"):
         return operation
     record = record_wave_override(
-        source_id=source_id,
+        source_id=wave_key,
         state=body.state,
         actor=user.email,
         justification=body.justification,

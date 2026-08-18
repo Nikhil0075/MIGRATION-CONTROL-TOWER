@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/preact";
 import { h } from "preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PageRouter, StatusPill } from "./pages";
+import { LifecycleProgress, PageRouter, StatusPill } from "./pages";
 import { formatValue, statusTone } from "../status";
 
 vi.mock("../api", () => ({
@@ -48,5 +48,30 @@ describe("evidence presentation", () => {
   it("does not invent values for unavailable measurements", () => {
     expect(formatValue(null)).toBe("Not available");
     expect(formatValue(0)).toBe("0");
+  });
+
+  it.each([
+    ["waiting", 67, "Waiting for cutover approval"],
+    ["held", 42, "Held by operator"],
+    ["failed", 50, "Validation failed"],
+    ["complete", 100, "Migration complete"],
+  ])("renders %s progress with text and accessible value", (status, percent, label) => {
+    render(
+      <LifecycleProgress
+        progress={{
+          percent,
+          status: status as any,
+          label,
+          current_stage: status.toUpperCase(),
+          completed_units: 1,
+          total_units: 12,
+          run_id: "run_test",
+          last_observed_at: "2026-08-18T00:00:00Z",
+        }}
+      />,
+    );
+    expect(screen.getByText(`${percent}%`)).toBeTruthy();
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(String(percent));
   });
 });

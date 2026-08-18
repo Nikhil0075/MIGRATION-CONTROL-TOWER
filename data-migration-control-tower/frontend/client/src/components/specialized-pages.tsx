@@ -9,13 +9,14 @@ import {
   PageState,
   Panel,
   StatusPill,
+  estatePath,
   useResource,
 } from "./pages";
 
 type RecordRow = Record<string, any>;
 
 export function LineagePage(props: PageProps) {
-  const state = useResource<RecordRow>("/api/v1/lineage");
+  const state = useResource<RecordRow>(estatePath("/api/v1/lineage", props.activeEstateId));
   const [filter, setFilter] = useState("ALL");
   const edges = state.data?.edges || [];
   const nodes = (state.data?.nodes || []).filter(
@@ -94,7 +95,7 @@ export function LineagePage(props: PageProps) {
 }
 
 export function EvaluationsPage(props: PageProps) {
-  const state = useResource<RecordRow>("/api/v1/evaluations");
+  const state = useResource<RecordRow>(estatePath("/api/v1/evaluations", props.activeEstateId));
   const scale = state.data?.scale_metrics;
   return (
     <>

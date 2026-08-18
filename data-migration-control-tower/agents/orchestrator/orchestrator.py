@@ -307,6 +307,18 @@ def handle_migration_requested(payload: dict) -> dict:
         )
         if claim_doc is not None:
             claim_doc.set({"run_id": run_id}, merge=True)
+        operation_id = payload.get("operation_id")
+        if operation_id:
+            get_client().collection("operation_requests").document(operation_id).set(
+                {
+                    "status": "active",
+                    "run_id": run_id,
+                    "estate_id": estate_id,
+                    "result": {"run_id": run_id},
+                    "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                },
+                merge=True,
+            )
         logger.info("migration.requested -> run created: %s (drop_fraction=%s)", run_id, drop_fraction)
     else:
         logger.info("migration.requested -> resuming existing run %s after a crash-recovery redo", run_id)

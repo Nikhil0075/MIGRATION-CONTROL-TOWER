@@ -25,7 +25,7 @@ const fixtureByPath: Record<string, unknown> = {
   "/api/v1/overview": {
     fleet_health: "HEALTHY",
     estate: { objects: 58, pipelines: 4, sources: [{ source_id: "wwi-sqlserver", health: "HEALTHY" }] },
-    runs: { migrated_percent: 100, complete: 1, active: 0 },
+    runs: { migrated_percent: 100, complete: 1, active: 0, latest: { progress: { percent: 100, status: "complete", label: "Migration complete", current_stage: "COMPLETE", completed_units: 12, total_units: 12, run_id: "run-live", last_observed_at: generatedAt } } },
     waves: { queued_operations: 0 },
     policy_denials: 2,
     recovery_rate: 1,
@@ -35,7 +35,10 @@ const fixtureByPath: Record<string, unknown> = {
     estimated_bytes: { status: "not_configured", reason: "Job byte telemetry is unavailable." },
     latency: {},
   },
-  "/api/v1/estates": [{ estate_id: "wwi", display_name: "Worldwide Importers", owner: "Data Platform", health: "HEALTHY", objects: 58, pipelines: 4, sources: [], target: { system: "BigQuery", dataset_env: "Production" } }],
+  "/api/v1/estates": [
+    { estate_id: "wwi-demo-estate", display_name: "Worldwide Importers", status: "ACTIVE", owner: "Data Platform", health: "HEALTHY", objects: 58, pipelines: 4, pipeline_options: [{ pipeline_id: "wwi.sales.customers", name: "Customers" }], sources: [{ source_id: "wwi-sqlserver", adapter: "sqlserver", health: "HEALTHY", execution_profiles: ["wwi-default"] }], target: { system: "BigQuery", dataset_env: "Production" } },
+    { estate_id: "retail-postgres-estate", display_name: "Retail PostgreSQL", status: "ACTIVE", objects: 12, pipelines: 1, sources: [{ source_id: "retail-postgres", adapter: "postgres", health: "HEALTHY" }], target: { system: "BigQuery" } },
+  ],
   "/api/v1/assessments": { packs: [{ pack_id: "wwi", label: "WWI", execution_supported: true }], runs: [] },
   "/api/v1/waves": {
     state: { running_critical: [], running_by_source: {} },
@@ -43,13 +46,16 @@ const fixtureByPath: Record<string, unknown> = {
     oldest_backlog_age_ms: null,
     queued: [], blocked: [], overrides: [], events: [],
   },
-  "/api/v1/runs": [{ run_id: "run-live", state: "COMPLETE", mode: "execution", updated_at: generatedAt }],
+  "/api/v1/runs": [{ run_id: "run-live", state: "COMPLETE", mode: "execution", updated_at: generatedAt, progress: { percent: 100, status: "complete", label: "Migration complete" } }],
   "/api/v1/lineage": { nodes: [{ id: "source.orders", label: "Orders", classification: "PII", confidence: 0.98 }], edges: [] },
   "/api/v1/reconciliation": [{ run_id: "run-live", status: "PASSED", delta: 0, tolerance: 0 }],
   "/api/v1/policies": { decisions: [{ policy_id: "cutover-approval", decision: "ALLOW", acting_identity: "approver@example.test" }], approvals: [] },
   "/api/v1/agents": { cards: [{ agent_id: "orchestrator", version: "1.0.0", status: "HEALTHY", owner: "Data Platform" }], pinned_run_counts: {} },
   "/api/v1/evaluations": { runs: [{ scenario: "full-migration", status: "PASSED" }], scale_metrics: null, scale_report_reason: "No persisted scale report." },
   "/api/v1/system-health": { build_version: "e2e", services: [{ service: "Cloud Run", status: "HEALTHY", freshness: generatedAt }] },
+  "/api/v1/search": [{ id: "run-live", kind: "run", title: "run-live", subtitle: "COMPLETE", route: "/runs/run-live" }],
+  "/api/v1/notifications": [{ id: "run-pending", kind: "approval", severity: "info", title: "Cutover approval required", status: "READY_FOR_APPROVAL", route: "/runs/run-pending" }],
+  "/api/v1/estate-validations": { status: "NOT_APPLICABLE", detail: "Static source" },
 };
 
 async function installApiFixtures(page: Page) {
@@ -60,10 +66,18 @@ async function installApiFixtures(page: Page) {
           product_name: "Migration Control Tower",
           build_version: "e2e",
           poll_interval_ms: 30_000,
+          progress_poll_interval_ms: 2_000,
+          environment: "Test",
           authentication_configured: true,
           firebase: {},
         }
-      : fixtureByPath[url.pathname] ?? [];
+      : url.pathname === "/api/v1/estate-validations"
+        ? fixtureByPath[url.pathname]
+        : url.pathname.startsWith("/api/v1/operations/")
+        ? { operation_id: "op-e2e", status: "active", progress: { percent: 42, status: "active", label: "Analyzing dependencies", current_stage: "ANALYZED", completed_units: 2, total_units: 12, run_id: "run-e2e", last_observed_at: generatedAt } }
+        : route.request().method() !== "GET"
+          ? { operation_id: "op-e2e", status: "published" }
+          : fixtureByPath[url.pathname] ?? [];
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -127,6 +141,76 @@ test("tables expose accessible controls and never encode status by color alone",
   await expect(page.getByText("COMPLETE", { exact: true })).toBeVisible();
   await expect(page.locator(".status-pill .status-dot")).toHaveAttribute("aria-hidden", "true");
   await expect(page.locator("summary", { hasText: "Columns" })).toBeVisible();
+  await page.getByPlaceholder("Filter runs").fill("does-not-exist");
+  await expect(page.getByText(/No records match/)).toBeVisible();
+  await page.getByPlaceholder("Filter runs").fill("");
+  await page.getByRole("columnheader", { name: /Run/ }).getByRole("button").click();
+  await page.locator("summary", { hasText: "Columns" }).click();
+  await expect(page.getByLabel("Updated")).toBeVisible();
+});
+
+test("action dialogs close with Escape, preserve focus, and show measured operation progress", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.goto("/assessments");
+  const trigger = page.getByRole("button", { name: "Start assessment" });
+  await trigger.click();
+  await expect(page.getByRole("dialog", { name: "Start assessment" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Start assessment" })).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await page.getByLabel("Justification").fill("Browser click audit assessment request");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByText("42%", { exact: true })).toBeVisible();
+  await expect(page.getByText("Analyzing dependencies")).toBeVisible();
+  await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+});
+
+test("responsive navigation drawer opens and navigates by click", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 768, height: 900 });
+  await page.goto("/overview");
+  const toggle = page.getByRole("button", { name: "Toggle navigation" });
+  await toggle.click();
+  await page.getByRole("button", { name: "Runs", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Runs", exact: true })).toBeVisible();
+});
+
+test("command bar estate, search, notifications and account controls are clickable", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.goto("/overview");
+  const estate = page.getByLabel("Active estate");
+  await expect(estate).toHaveValue("wwi-demo-estate");
+  await estate.selectOption("retail-postgres-estate");
+  await expect(page).toHaveURL(/estate_id=retail-postgres-estate/);
+
+  const search = page.getByPlaceholder("Search");
+  await search.fill("run-live");
+  await expect(page.getByRole("dialog", { name: "Search commands" })).toBeVisible();
+  await expect(page.getByText("run-live", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Search commands" })).toBeHidden();
+
+  await page.getByRole("button", { name: "Notifications" }).click();
+  await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
+  await page.getByRole("button", { name: "Close inspector" }).click();
+
+  await page.locator(".user-menu").click();
+  await expect(page.getByRole("menuitem", { name: /Sign out/ })).toBeVisible();
+  await page.getByRole("menuitem", { name: /Sign out/ }).click();
+});
+
+test("every primary navigation item and product home action works by click", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.goto("/overview");
+  const navNames: Record<string, string> = { waves: "Waves" };
+  for (const [route, title] of routes.slice(1)) {
+    await page.getByRole("button", { name: navNames[route] || title, exact: true }).click();
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/${route}\\?estate_id=`));
+  }
+  await page.getByRole("button", { name: "Migration Control Tower overview" }).click();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 });
 
 
@@ -166,7 +250,7 @@ test("estate onboarding wizard walks its steps and never offers a password field
   expect(errors).toEqual([]);
 });
 
-test("an assessment-only adapter skips the connection step", async ({ page }) => {
+test("an assessment-only adapter follows credential-free validation", async ({ page }) => {
   await installApiFixtures(page);
   await page.goto("/estates/new");
   await page.getByLabel("Estate ID").fill("corpus-estate");
@@ -175,9 +259,14 @@ test("an assessment-only adapter skips the connection step", async ({ page }) =>
   await page.getByLabel("Source ID").fill("corpus");
   await page.getByLabel("Adapter").selectOption("oracle_corpus");
 
-  // Declared capabilities drive the UI: no live server means no
-  // connection step, and the limitation is stated rather than implied.
+  // Declared capabilities drive a credential-free connection and
+  // validation path; the limitation is stated rather than implied.
   await expect(page.getByText(/supports discovery only/)).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByText(/has no server to connect to/)).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Validate source" }).click();
+  await expect(page.getByText("NOT_APPLICABLE")).toBeVisible();
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByText("Migration Pack", { exact: true }).first()).toBeVisible();
 });

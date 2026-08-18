@@ -56,6 +56,41 @@ def test_session_derives_roles_from_custom_claims(client: TestClient, monkeypatc
     response = client.get("/api/v1/session", headers=_headers())
     assert response.status_code == 200
     assert response.json()["data"]["roles"] == ["operator", "viewer"]
+    assert response.json()["data"]["wildcard_roles"] == ["operator", "viewer"]
+    assert response.json()["data"]["estate_roles"]["*"] == ["operator", "viewer"]
+
+
+def test_progress_uses_durable_milestones_not_elapsed_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frontend.api_v1 import _run_progress
+
+    monkeypatch.setattr("frontend.api_v1._collection_docs", lambda *_args, **_kwargs: [])
+    progress = _run_progress({
+        "run_id": "run_progress",
+        "state": "READY_FOR_APPROVAL",
+        "created_at": "2020-01-01T00:00:00+00:00",
+        "last_transition_at": "2026-08-18T00:00:00+00:00",
+    })
+    assert progress["percent"] == 67
+    assert progress["status"] == "waiting"
+    assert progress["current_stage"] == "READY_FOR_APPROVAL"
+
+
+def test_assessment_progress_reaches_100_at_planned(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frontend.api_v1 import _run_progress
+
+    monkeypatch.setattr("frontend.api_v1._collection_docs", lambda *_args, **_kwargs: [])
+    progress = _run_progress({"run_id": "assessment_1", "mode": "assessment", "state": "PLANNED"})
+    assert progress["percent"] == 100
+    assert progress["status"] == "complete"
+
+
+def test_validation_failure_holds_at_validation_milestone(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frontend.api_v1 import _run_progress
+
+    monkeypatch.setattr("frontend.api_v1._collection_docs", lambda *_args, **_kwargs: [])
+    progress = _run_progress({"run_id": "run_failed", "state": "FAILED"})
+    assert progress["percent"] == 50
+    assert progress["status"] == "failed"
 
 
 def test_viewer_cannot_start_assessment(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -240,3 +275,51 @@ def test_unknown_adapter_falls_back_to_the_source_id():
     from frontend.api_v1 import _catalog_system_for
 
     assert _catalog_system_for({"adapter": "brand-new", "source_id": "acme-src"}) == "acme-src"
+
+
+# --- Theme integrity (Day 11 Phase 9) ------------------------------------
+
+
+def test_released_css_contains_no_stray_byte_order_mark():
+    """A BOM anywhere but a file's start silently invalidates the rule it
+    prefixes.
+
+    This shipped: the bundler emitted one at the seam between the JET theme
+    and app.css, so the selector became "﻿:root" and matched nothing.
+    Every --mct-* custom property was undefined, `background: var(--mct-red)`
+    computed to transparent, and the literal `color: #fff` still applied —
+    the "Sign in with Google" button rendered white on a white card. It was
+    present, focusable and 376x34px, so nothing failed; it was simply
+    invisible.
+
+    No component or browser test caught it, because the DOM was correct.
+    Only the bytes were wrong.
+    """
+    from pathlib import Path
+
+    web = Path(__file__).resolve().parents[1] / "frontend" / "client" / "web"
+    stylesheets = list(web.glob("styles/*.css"))
+    assert stylesheets, "no release stylesheet found — run `npm run build` first"
+    for sheet in stylesheets:
+        raw = sheet.read_bytes()
+        assert b"\xef\xbb\xbf" not in raw, (
+            f"{sheet.name} contains a U+FEFF byte-order mark; any CSS rule it "
+            f"prefixes will silently never match."
+        )
+
+
+def test_released_css_defines_the_theme_variables():
+    """The :root custom properties must survive the build.
+
+    Asserted on the built artifact rather than the source, because the
+    source was correct the whole time the UI was broken.
+    """
+    import re
+    from pathlib import Path
+
+    web = Path(__file__).resolve().parents[1] / "frontend" / "client" / "web"
+    css = "\n".join(p.read_text(encoding="utf-8") for p in web.glob("styles/*.css"))
+    match = re.search(r"(?<![\w\﻿]):root\s*\{([^}]*)\}", css)
+    assert match, "no usable :root rule in the release stylesheet"
+    for variable in ("--mct-red", "--mct-ink", "--mct-surface", "--mct-canvas"):
+        assert variable in match.group(1), f"{variable} missing from :root"

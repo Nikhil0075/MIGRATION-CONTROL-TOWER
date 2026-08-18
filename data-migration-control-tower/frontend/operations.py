@@ -69,6 +69,10 @@ def queue_operation(
             "justification": justification,
             "topic": topic,
             "event": event,
+            # Kept at the top level so authorization, progress polling and
+            # cleanup never need to interpret a command-specific payload.
+            "estate_id": event.get("estate_id"),
+            "run_id": event.get("run_id"),
             "created_at": now,
             "updated_at": now,
         }

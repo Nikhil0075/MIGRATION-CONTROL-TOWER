@@ -21,9 +21,10 @@
  */
 
 import { cloneElement } from "preact";
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { api, idempotencyKey } from "../api";
-import { PageHeader, PageProps, Panel, useResource } from "./pages";
+import { EstateSummary } from "../models";
+import { ActionForm, PageHeader, PageProps, Panel, useResource } from "./pages";
 
 type AdapterType = {
   adapter_type: string;
@@ -50,6 +51,7 @@ const STEPS = [
   "Identity",
   "Source",
   "Connection",
+  "Validate",
   "Pack",
   "Review",
 ] as const;
@@ -96,8 +98,8 @@ function Field({
   );
 }
 
-export function EstateWizard({ session, navigate }: PageProps) {
-  const canOperate = session.roles?.includes("operator");
+export function EstateWizard({ session, navigate, estateRoles, onEstateCreated, progressPollIntervalMs }: PageProps) {
+  const canOperate = (estateRoles || session.roles).includes("operator");
   const adapters = useResource<AdapterType[]>("/api/v1/adapter-types");
   const assessments = useResource<any>("/api/v1/assessments");
   const packs: Pack[] = assessments.data?.packs || [];
@@ -140,36 +142,45 @@ export function EstateWizard({ session, navigate }: PageProps) {
   const connectionValid =
     !needsConnection || Boolean(secretRef.trim() || passwordEnv.trim());
   const reviewValid = justification.trim().length >= 8;
+  const validationValid = Boolean(validation && ["HEALTHY", "OBSERVED", "OK", "NOT_APPLICABLE"].includes(validation.status));
 
   const stepValid = [
     identityValid,
     sourceValid,
     connectionValid,
+    validationValid,
     true, // pack selection is optional — an estate may be assessed first
     reviewValid,
   ][step];
+
+  useEffect(() => {
+    setValidation(null);
+  }, [estateId, sourceId, adapter, database, hostEnv, portEnv, userEnv, secretRef, passwordEnv]);
+
+  function buildSource() {
+    return {
+      source_id: sourceId,
+      adapter,
+      config: database ? { database } : {},
+      pack_id: packId || null,
+      connection_profile: needsConnection
+        ? {
+            host_env: hostEnv || null,
+            port_env: portEnv || null,
+            user_env: userEnv || null,
+            password_secret_ref: secretRef.trim() || null,
+            password_env: passwordEnv.trim() || null,
+          }
+        : null,
+    };
+  }
 
   function buildPayload() {
     return {
       estate_id: estateId,
       display_name: displayName,
       sources: [
-        {
-          source_id: sourceId,
-          adapter,
-          config: database ? { database } : {},
-          pack_id: packId || null,
-          connection_profile: needsConnection
-            ? {
-                host_env: hostEnv || null,
-                port_env: portEnv || null,
-                user_env: userEnv || null,
-                // References only. Never a value.
-                password_secret_ref: secretRef.trim() || null,
-                password_env: passwordEnv.trim() || null,
-              }
-            : null,
-        },
+        buildSource(),
       ],
       target: { system: "bigquery", dataset_env: datasetEnv || null },
       justification,
@@ -180,11 +191,12 @@ export function EstateWizard({ session, navigate }: PageProps) {
     setBusy(true);
     setError(null);
     try {
-      await api("/api/v1/estates", {
+      const result = await api<EstateSummary>("/api/v1/estates", {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey("estate-create") },
         body: JSON.stringify(buildPayload()),
       });
+      onEstateCreated?.(result.data);
       setCreated(true);
     } catch (err: any) {
       setError(err?.message || "The estate could not be created.");
@@ -197,12 +209,10 @@ export function EstateWizard({ session, navigate }: PageProps) {
     setBusy(true);
     setError(null);
     try {
-      const result = await api<ValidationResult>(
-        `/api/v1/estates/${encodeURIComponent(estateId)}/sources/${encodeURIComponent(
-          sourceId,
-        )}/validate`,
-        { method: "POST" },
-      );
+      const result = await api<ValidationResult>("/api/v1/estate-validations", {
+        method: "POST",
+        body: JSON.stringify({ estate_id: estateId, source: buildSource() }),
+      });
       setValidation(result.data);
     } catch (err: any) {
       setError(err?.message || "The connection could not be validated.");
@@ -215,12 +225,13 @@ export function EstateWizard({ session, navigate }: PageProps) {
     <>
       <PageHeader
         title="Onboard an estate"
-        description="Describe the estate, bind credential references, pick a Migration Pack, then validate."
+        description="Describe the estate, bind credential references, validate the source, then select a Migration Pack."
       />
 
       <ol class="wizard-steps" aria-label="Onboarding steps">
         {STEPS.map((label, index) => (
           <li
+            key={label}
             class={`wizard-step${index === step ? " is-current" : ""}${
               index < step ? " is-done" : ""
             }`}
@@ -381,6 +392,23 @@ export function EstateWizard({ session, navigate }: PageProps) {
       )}
 
       {step === 3 && (
+        <Panel title="Validate source" subtitle="A live, non-persisting connection probe before estate creation">
+          <p class="notice">Validation uses only the references entered on the previous step. Changing any source or connection field invalidates this result.</p>
+          <button type="button" class="button button-primary" disabled={busy || !connectionValid} onClick={validateConnection}>
+            {busy ? "Validating…" : needsConnection ? "Validate connection" : "Validate source"}
+          </button>
+          {validation && (
+            <dl class="wizard-summary" aria-live="polite">
+              <dt>Status</dt><dd>{validation.status}</dd>
+              <dt>Detail</dt><dd>{validation.detail || "—"}</dd>
+              <dt>Objects</dt><dd>{validation.object_count ?? "—"}</dd>
+              <dt>Latency</dt><dd>{validation.latency_ms == null ? "—" : `${validation.latency_ms} ms`}</dd>
+            </dl>
+          )}
+        </Panel>
+      )}
+
+      {step === 4 && (
         <Panel
           title="Migration Pack"
           subtitle="Source-family rules: classification, dialect notes, data types, scheduled tables"
@@ -412,7 +440,7 @@ export function EstateWizard({ session, navigate }: PageProps) {
         </Panel>
       )}
 
-      {step === 4 && (
+      {step === 5 && (
         <Panel title="Review" subtitle="Nothing is saved until you confirm">
           <dl class="wizard-summary">
             <dt>Estate</dt>
@@ -458,29 +486,17 @@ export function EstateWizard({ session, navigate }: PageProps) {
               <p class="notice notice-success" role="status">
                 Estate <code>{estateId}</code> created.
               </p>
-              {needsConnection && (
-                <button
-                  type="button"
-                  class="button"
-                  disabled={busy}
-                  onClick={validateConnection}
-                >
-                  {busy ? "Validating…" : "Validate connection"}
-                </button>
-              )}
-              {validation && (
-                <dl class="wizard-summary" aria-live="polite">
-                  <dt>Status</dt>
-                  <dd>{validation.status}</dd>
-                  <dt>Detail</dt>
-                  <dd>{validation.detail || "—"}</dd>
-                  <dt>Objects</dt>
-                  <dd>{validation.object_count ?? "—"}</dd>
-                  <dt>Latency</dt>
-                  <dd>
-                    {validation.latency_ms == null ? "—" : `${validation.latency_ms} ms`}
-                  </dd>
-                </dl>
+              {packId && (
+                <ActionForm
+                  title="Start assessment"
+                  description={`Start a read-only assessment with ${packId}.`}
+                  progressPollIntervalMs={progressPollIntervalMs}
+                  onSubmit={(reason) => api("/api/v1/assessments", {
+                    method: "POST",
+                    headers: { "Idempotency-Key": idempotencyKey("assessment") },
+                    body: JSON.stringify({ pack_id: packId, estate_id: estateId, justification: reason }),
+                  })}
+                />
               )}
               <button
                 type="button"
@@ -516,8 +532,7 @@ export function EstateWizard({ session, navigate }: PageProps) {
           onClick={() => {
             // Skip the connection step entirely for static-file sources
             // rather than showing fields that would mean nothing.
-            const next = step + 1;
-            setStep(next === 2 && !needsConnection ? 3 : next);
+            setStep(step + 1);
           }}
         >
           Next

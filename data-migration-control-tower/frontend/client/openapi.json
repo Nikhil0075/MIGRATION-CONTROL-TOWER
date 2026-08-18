@@ -966,6 +966,66 @@
         }
       }
     },
+    "/api/v1/estate-validations": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Validate Transient Estate Source",
+        "description": "Validate connection references before the estate is persisted.",
+        "operationId": "validate_transient_estate_source_api_v1_estate_validations_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstateValidationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/assessments": {
       "get": {
         "tags": [
@@ -1673,6 +1733,22 @@
         "operationId": "agents_api_v1_agents_get",
         "parameters": [
           {
+            "name": "estate_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Estate Id"
+            }
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
@@ -1722,6 +1798,22 @@
         "operationId": "evaluations_api_v1_evaluations_get",
         "parameters": [
           {
+            "name": "estate_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Estate Id"
+            }
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
@@ -1770,6 +1862,211 @@
         "summary": "System Health",
         "operationId": "system_health_api_v1_system_health_get",
         "parameters": [
+          {
+            "name": "estate_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Estate Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/operations/{operation_id}": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Operation Status",
+        "operationId": "operation_status_api_v1_operations__operation_id__get",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Search Console",
+        "operationId": "search_console_api_v1_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "estate_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 100,
+              "title": "Estate Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Notifications",
+        "operationId": "notifications_api_v1_notifications_get",
+        "parameters": [
+          {
+            "name": "estate_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 100,
+              "title": "Estate Id"
+            }
+          },
           {
             "name": "authorization",
             "in": "header",
@@ -2421,6 +2718,26 @@
         "type": "object",
         "title": "EstateTargetModel"
       },
+      "EstateValidationRequest": {
+        "properties": {
+          "estate_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 2,
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "title": "Estate Id"
+          },
+          "source": {
+            "$ref": "#/components/schemas/EstateSourceModel"
+          }
+        },
+        "type": "object",
+        "required": [
+          "estate_id",
+          "source"
+        ],
+        "title": "EstateValidationRequest"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2529,12 +2846,12 @@
             "type": "string",
             "maxLength": 200,
             "minLength": 2,
-            "title": "Pipeline Id",
-            "default": "wwi.sales.customers"
+            "title": "Pipeline Id"
           },
           "execution_profile": {
             "type": "string",
-            "const": "wwi-default",
+            "maxLength": 100,
+            "minLength": 2,
             "title": "Execution Profile",
             "default": "wwi-default"
           },
@@ -2554,6 +2871,7 @@
         },
         "type": "object",
         "required": [
+          "pipeline_id",
           "justification"
         ],
         "title": "StartRunRequest"
@@ -2703,6 +3021,13 @@
               }
             ],
             "title": "Expires At"
+          },
+          "estate_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 2,
+            "title": "Estate Id",
+            "default": "wwi-demo-estate"
           }
         },
         "type": "object",

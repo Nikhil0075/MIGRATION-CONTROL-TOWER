@@ -22,6 +22,7 @@ from __future__ import annotations
 import datetime as dt
 import sys
 from pathlib import Path
+from typing import Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -45,13 +46,26 @@ REPORTS_DIR = REPO_ROOT / "evaluation" / "reports"
 _NO_CORPUS_PLACEHOLDER = "simulator/source_setup/_no_corpus_for_this_pack"
 
 
-def run_assessment(pack_path: str) -> dict:
+def run_assessment(
+    pack_path: str,
+    *,
+    estate_id: str | None = None,
+    on_run_created: Callable[[str], None] | None = None,
+) -> dict:
     pack = load_pack(pack_path)
     adapter = build_adapter_for_pack(pack)
 
     print(f"[assessment] pack={pack['pack_id']!r} v{pack['version']}, source={adapter.system!r}")
 
-    run_id = create_run(pack["pack_id"], mode="assessment")
+    run_id = create_run(
+        pack["pack_id"],
+        mode="assessment",
+        estate_id=estate_id,
+        source_id=pack.get("source_id"),
+        pack_id=pack["pack_id"],
+    )
+    if on_run_created:
+        on_run_created(run_id)
     print(f"[assessment] created run: {run_id} (mode=assessment)")
 
     tables = adapter.discover_tables()

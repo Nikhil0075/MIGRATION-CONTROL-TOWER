@@ -1,8 +1,9 @@
 import { h } from "preact";
+import { ProgressBar } from "oj-c/progress-bar";
 import { lazy, Suspense } from "preact/compat";
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, idempotencyKey } from "../api";
-import { Column, Session } from "../models";
+import { Column, EstateSummary, ProgressSnapshot, Role, Session } from "../models";
 import { formatValue, statusTone } from "../status";
 import { Icon } from "./icons";
 
@@ -12,7 +13,58 @@ export type PageProps = {
   session: Session;
   onInspect: (title: string, value: unknown) => void;
   navigate: (route: string) => void;
+  activeEstateId?: string | null;
+  activeEstate?: EstateSummary | null;
+  estateRoles?: Role[];
+  onEstateCreated?: (estate: EstateSummary) => void;
+  progressPollIntervalMs?: number;
 };
+
+export function estatePath(path: string, estateId?: string | null): string {
+  if (!estateId) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}estate_id=${encodeURIComponent(estateId)}`;
+}
+
+export function LifecycleProgress({ progress, compact = false }: { progress?: ProgressSnapshot | null; compact?: boolean }) {
+  if (!progress) return <span class="unavailable">Not observed</span>;
+  return (
+    <div class={`lifecycle-progress ${compact ? "compact" : ""}`} aria-label={`${progress.label}: ${progress.percent}%`}>
+      <div class="progress-heading">
+        <StatusPill value={progress.status} />
+        <strong>{progress.percent}%</strong>
+      </div>
+      <ProgressBar value={progress.percent} max={100} aria-label={progress.label} />
+      <div class="progress-caption"><span>{progress.label}</span><small>{progress.completed_units} of {progress.total_units} milestones</small></div>
+    </div>
+  );
+}
+
+function useOperationProgress(operationId: string | null, intervalMs: number) {
+  const [progress, setProgress] = useState<ProgressSnapshot | null>(null);
+  useEffect(() => {
+    if (!operationId) return;
+    let active = true;
+    let timer: number | undefined;
+    const poll = async () => {
+      if (document.hidden) {
+        timer = window.setTimeout(poll, intervalMs);
+        return;
+      }
+      try {
+        const result = await api<any>(`/api/v1/operations/${encodeURIComponent(operationId)}`);
+        if (!active) return;
+        setProgress(result.data.progress);
+        if (!["complete", "failed"].includes(result.data.progress?.status)) timer = window.setTimeout(poll, intervalMs);
+      } catch {
+        if (active) timer = window.setTimeout(poll, intervalMs);
+      }
+    };
+    void poll();
+    return () => { active = false; if (timer) window.clearTimeout(timer); };
+  }, [operationId, intervalMs]);
+  return progress;
+}
 
 export function StatusPill({ value }: { value: unknown }) {
   const label = String(value || "UNKNOWN").replaceAll("_", " ");
@@ -58,7 +110,8 @@ export function PageState({
   if (loading)
     return (
       <div class="page-state">
-        <span class="spinner" /> Loading operational data…
+        <ProgressBar value={-1} aria-label="Loading operational data" />
+        <span>Loading operational data…</span>
       </div>
     );
   if (error)
@@ -334,27 +387,47 @@ export function DataTable({
   );
 }
 
-function ActionForm({
+export function ActionForm({
   title,
   description,
   disabled,
   onSubmit,
+  progressPollIntervalMs = 2000,
 }: {
   title: string;
   description: string;
   disabled?: boolean;
-  onSubmit: (justification: string) => Promise<void>;
+  onSubmit: (justification: string) => Promise<any>;
+  progressPollIntervalMs?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [justification, setJustification] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [operationId, setOperationId] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLFormElement>(null);
+  const progress = useOperationProgress(operationId, progressPollIntervalMs);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: KeyboardEvent | MouseEvent) => {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+      if (event instanceof MouseEvent && panelRef.current?.contains(event.target as Node)) return;
+      if (event instanceof MouseEvent && triggerRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("keydown", close);
+    document.addEventListener("mousedown", close);
+    return () => { document.removeEventListener("keydown", close); document.removeEventListener("mousedown", close); };
+  }, [open]);
   async function submit(event: Event) {
     event.preventDefault();
     setBusy(true);
     setMessage(null);
     try {
-      await onSubmit(justification);
+      const result = await onSubmit(justification);
+      setOperationId(result?.data?.operation_id || null);
       setMessage("Operation accepted and queued.");
       setJustification("");
     } catch (reason: any) {
@@ -366,6 +439,7 @@ function ActionForm({
   return (
     <div class="action-form">
       <button
+        ref={triggerRef}
         class="button button-primary"
         disabled={disabled}
         onClick={() => setOpen(!open)}
@@ -373,7 +447,7 @@ function ActionForm({
         {title}
       </button>
       {open && (
-        <form onSubmit={submit}>
+        <form ref={panelRef} onSubmit={submit} role="dialog" aria-label={title}>
           <p>{description}</p>
           <label>
             Justification
@@ -401,15 +475,16 @@ function ActionForm({
               {message}
             </p>
           )}
+          {operationId && <LifecycleProgress progress={progress} />}
         </form>
       )}
     </div>
   );
 }
 
-function OverviewPage({ onInspect }: PageProps) {
+function OverviewPage({ onInspect, activeEstateId }: PageProps) {
   const [refresh, setRefresh] = useState(0);
-  const state = useResource<RecordRow>("/api/v1/overview", refresh);
+  const state = useResource<RecordRow>(estatePath("/api/v1/overview", activeEstateId), refresh);
   const data = state.data;
   return (
     <>
@@ -439,7 +514,7 @@ function OverviewPage({ onInspect }: PageProps) {
               detail={`${data.estate?.pipelines || 0} pipelines`}
             />
             <MetricCard
-              label="Migration progress"
+              label="Row transfer"
               value={
                 data.runs?.migrated_percent === null
                   ? null
@@ -467,6 +542,9 @@ function OverviewPage({ onInspect }: PageProps) {
               detail={`${data.human_interventions || 0} human interventions`}
             />
           </div>
+          <Panel title="Latest lifecycle" subtitle="Measured durable milestones; row transfer is reported separately">
+            <LifecycleProgress progress={data.runs?.latest?.progress} />
+          </Panel>
           <div class="workspace-grid two-one">
             <Panel
               title="Current estate"
@@ -536,17 +614,18 @@ function OverviewPage({ onInspect }: PageProps) {
   );
 }
 
-function EstatesPage({ onInspect, session, navigate }: PageProps) {
+function EstatesPage({ onInspect, session, navigate, activeEstateId, estateRoles }: PageProps) {
   const state = useResource<any[]>("/api/v1/estates");
   const estates = state.data || [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const canOperate = session.roles.includes("operator");
+  const canOperate = (estateRoles || session.roles).includes("operator");
 
   // Select the first estate once loaded, but let the operator switch.
   // Before Day 11 Phase 6 this page rendered data[0] unconditionally,
   // which was correct only while exactly one estate could exist.
   const estate =
-    estates.find((item) => item.estate_id === selectedId) || estates[0];
+    estates.find((item) => item.estate_id === selectedId) ||
+    estates.find((item) => item.estate_id === activeEstateId) || estates[0];
 
   return (
     <>
@@ -641,9 +720,9 @@ function EstatesPage({ onInspect, session, navigate }: PageProps) {
 
 function AssessmentsPage(props: PageProps) {
   const [refresh, setRefresh] = useState(0);
-  const state = useResource<RecordRow>("/api/v1/assessments", refresh);
+  const state = useResource<RecordRow>(estatePath("/api/v1/assessments", props.activeEstateId), refresh);
   const [packId, setPackId] = useState("");
-  const canOperate = props.session.roles.includes("operator");
+  const canOperate = (props.estateRoles || props.session.roles).includes("operator");
   useEffect(() => {
     if (!packId && state.data?.packs?.length)
       setPackId(state.data.packs[0].pack_id);
@@ -672,17 +751,19 @@ function AssessmentsPage(props: PageProps) {
               description={`Start an assessment with ${packId}.`}
               disabled={!canOperate || !packId}
               onSubmit={async (justification) => {
-                await api("/api/v1/assessments", {
+                const result = await api("/api/v1/assessments", {
                   method: "POST",
                   headers: { "Idempotency-Key": idempotencyKey("assessment") },
                   body: JSON.stringify({
                     pack_id: packId,
-                    estate_id: "wwi-demo-estate",
+                    estate_id: props.activeEstateId,
                     justification,
                   }),
                 });
                 setRefresh(refresh + 1);
+                return result;
               }}
+              progressPollIntervalMs={props.progressPollIntervalMs}
             />
           </div>
         }
@@ -698,6 +779,7 @@ function AssessmentsPage(props: PageProps) {
                 { key: "run_id", label: "Run" },
                 { key: "pipeline_id", label: "Pack" },
                 { key: "state", label: "State", status: true },
+                { key: "lifecycle", label: "Lifecycle", value: (row) => `${row.progress?.percent ?? 0}% · ${row.progress?.label || "Queued"}` },
                 { key: "created_at", label: "Created" },
                 { key: "last_transition_at", label: "Updated" },
               ]}
@@ -725,10 +807,14 @@ function AssessmentsPage(props: PageProps) {
 
 function WavesPage(props: PageProps) {
   const [refresh, setRefresh] = useState(0);
-  const state = useResource<RecordRow>("/api/v1/waves", refresh);
-  const [sourceId, setSourceId] = useState("wwi-sqlserver");
+  const state = useResource<RecordRow>(estatePath("/api/v1/waves", props.activeEstateId), refresh);
+  const [sourceId, setSourceId] = useState("");
   const [overrideState, setOverrideState] = useState("HOLD");
-  const canOperate = props.session.roles.includes("operator");
+  const canOperate = (props.estateRoles || props.session.roles).includes("operator");
+  const estateSources = (props.activeEstate?.sources || []) as any[];
+  useEffect(() => {
+    if (!estateSources.some((source) => source.source_id === sourceId)) setSourceId(estateSources[0]?.source_id || "");
+  }, [props.activeEstateId, props.activeEstate]);
   const running = Object.entries(
     state.data?.state?.running_by_source || {},
   ).flatMap(([source, items]: any) =>
@@ -750,11 +836,7 @@ function WavesPage(props: PageProps) {
               value={sourceId}
               onChange={(event) => setSourceId(event.currentTarget.value)}
             >
-              {Object.keys(state.data?.limits?.max_concurrent_per_source || {})
-                .filter((item) => item !== "default")
-                .map((item) => (
-                  <option>{item}</option>
-                ))}
+              {estateSources.map((source) => <option value={source.source_id}>{source.source_id}</option>)}
             </select>
             <select
               value={overrideState}
@@ -766,9 +848,9 @@ function WavesPage(props: PageProps) {
             <ActionForm
               title="Apply override"
               description={`Apply ${overrideState} to ${sourceId}.`}
-              disabled={!canOperate}
+              disabled={!canOperate || !sourceId}
               onSubmit={async (justification) => {
-                await api(
+                const result = await api(
                   `/api/v1/waves/${encodeURIComponent(sourceId)}/override`,
                   {
                     method: "PUT",
@@ -776,11 +858,14 @@ function WavesPage(props: PageProps) {
                     body: JSON.stringify({
                       state: overrideState,
                       justification,
+                      estate_id: props.activeEstateId,
                     }),
                   },
                 );
                 setRefresh(refresh + 1);
+                return result;
               }}
+              progressPollIntervalMs={props.progressPollIntervalMs}
             />
           </div>
         }
@@ -878,8 +963,13 @@ function WavesPage(props: PageProps) {
 function RunsPage(props: PageProps) {
   const runId = props.route.replace(/^\/+|\/+$/g, "").split("/")[1];
   if (runId) return <RunDetailPage {...props} runId={runId} />;
-  const state = useResource<any[]>("/api/v1/runs?limit=100");
-  const canOperate = props.session.roles.includes("operator");
+  const state = useResource<any[]>(estatePath("/api/v1/runs?limit=100", props.activeEstateId));
+  const canOperate = (props.estateRoles || props.session.roles).includes("operator");
+  const pipelines = props.activeEstate?.pipeline_options || [];
+  const sources = (props.activeEstate?.sources || []) as any[];
+  const executionSource = sources.find((source) => (source.execution_profiles || []).length) || sources[0];
+  const pipelineId = pipelines[0]?.pipeline_id;
+  const executionProfile = executionSource?.execution_profiles?.[0] || executionSource?.pack_id;
   return (
     <>
       <PageHeader
@@ -889,19 +979,21 @@ function RunsPage(props: PageProps) {
         actions={
           <ActionForm
             title="Start migration"
-            description="Start the supported WWI execution profile."
-            disabled={!canOperate}
+            description={pipelineId ? `Start ${pipelineId} using ${executionProfile || "the estate execution profile"}.` : "No executable pipeline has been discovered for this estate."}
+            disabled={!canOperate || !pipelineId || !executionProfile || !props.activeEstateId}
             onSubmit={async (justification) => {
-              await api("/api/v1/runs", {
+              return api("/api/v1/runs", {
                 method: "POST",
                 headers: { "Idempotency-Key": idempotencyKey("migration") },
                 body: JSON.stringify({
-                  pipeline_id: "wwi.sales.customers",
-                  execution_profile: "wwi-default",
+                  pipeline_id: pipelineId,
+                  execution_profile: executionProfile,
+                  estate_id: props.activeEstateId,
                   justification,
                 }),
               });
             }}
+            progressPollIntervalMs={props.progressPollIntervalMs}
           />
         }
       />
@@ -916,6 +1008,7 @@ function RunsPage(props: PageProps) {
               { key: "pipeline_id", label: "Pipeline" },
               { key: "mode", label: "Mode" },
               { key: "state", label: "State", status: true },
+              { key: "progress", label: "Lifecycle", value: (row) => `${row.progress?.percent ?? 0}% · ${row.progress?.label || "Queued"}` },
               { key: "created_at", label: "Created" },
               { key: "last_transition_at", label: "Updated" },
               { key: "attempt", label: "Attempt", priority: "secondary" },
@@ -936,10 +1029,10 @@ function RunDetailPage(props: PageProps & { runId: string }) {
   );
   const data = state.data;
   const canRetry =
-    props.session.roles.includes("operator") &&
+    (props.estateRoles || props.session.roles).includes("operator") &&
     ["PLANNED", "FAILED"].includes(data?.run?.state);
   const canApprove =
-    props.session.roles.includes("approver") &&
+    (props.estateRoles || props.session.roles).includes("approver") &&
     data?.run?.state === "READY_FOR_APPROVAL";
   const history = data?.run?.state_history || [];
   return (
@@ -958,7 +1051,7 @@ function RunDetailPage(props: PageProps & { runId: string }) {
                 title="Retry run"
                 description={`Retry from ${data?.run?.state}.`}
                 onSubmit={async (justification) => {
-                  await api(
+                  const result = await api(
                     `/api/v1/runs/${encodeURIComponent(props.runId)}/retry`,
                     {
                       method: "POST",
@@ -967,7 +1060,9 @@ function RunDetailPage(props: PageProps & { runId: string }) {
                     },
                   );
                   setRefresh(refresh + 1);
+                  return result;
                 }}
+                progressPollIntervalMs={props.progressPollIntervalMs}
               />
             )}
             {canApprove && (
@@ -975,7 +1070,7 @@ function RunDetailPage(props: PageProps & { runId: string }) {
                 title="Approve cutover"
                 description="Approve the recorded plan scope for cutover."
                 onSubmit={async (justification) => {
-                  await api(
+                  const result = await api(
                     `/api/v1/runs/${encodeURIComponent(props.runId)}/approve`,
                     {
                       method: "POST",
@@ -984,7 +1079,9 @@ function RunDetailPage(props: PageProps & { runId: string }) {
                     },
                   );
                   setRefresh(refresh + 1);
+                  return result;
                 }}
+                progressPollIntervalMs={props.progressPollIntervalMs}
               />
             )}
           </div>
@@ -1011,6 +1108,9 @@ function RunDetailPage(props: PageProps & { runId: string }) {
             />
             <MetricCard label="Trace" value={data.run.trace_id} />
           </div>
+          <Panel title="Lifecycle progress" subtitle="Governance and cutover milestones, not elapsed-time estimation">
+            <LifecycleProgress progress={data.run.progress} />
+          </Panel>
           <Panel title="Stage timeline">
             <ol class="stage-timeline">
               {history.map((item: any, index: number) => (
@@ -1066,6 +1166,11 @@ function RunDetailPage(props: PageProps & { runId: string }) {
                   { key: "status", label: "Status", status: true },
                   { key: "source_count", label: "Source rows" },
                   { key: "target_count", label: "Target rows" },
+                  {
+                    key: "row_transfer",
+                    label: "Row transfer",
+                    value: (row) => row.source_count ? `${Math.min(100, Math.round(100 * (row.target_count || 0) / row.source_count))}%` : "Not available",
+                  },
                   { key: "bytes_read", label: "Bytes read" },
                   { key: "bytes_written", label: "Bytes written" },
                   { key: "duration_ms", label: "Duration ms" },
@@ -1134,7 +1239,7 @@ function RunDetailPage(props: PageProps & { runId: string }) {
 }
 
 function LineagePage(props: PageProps) {
-  const state = useResource<RecordRow>("/api/v1/lineage");
+  const state = useResource<RecordRow>(estatePath("/api/v1/lineage", props.activeEstateId));
   const [filter, setFilter] = useState("ALL");
   const edges = state.data?.edges || [];
   const nodes = (state.data?.nodes || []).filter(
@@ -1213,7 +1318,7 @@ function LineagePage(props: PageProps) {
 }
 
 function ReconciliationPage(props: PageProps) {
-  const state = useResource<any[]>("/api/v1/reconciliation");
+  const state = useResource<any[]>(estatePath("/api/v1/reconciliation", props.activeEstateId));
   return (
     <>
       <PageHeader
@@ -1246,7 +1351,7 @@ function ReconciliationPage(props: PageProps) {
 }
 
 function PoliciesPage(props: PageProps) {
-  const state = useResource<RecordRow>("/api/v1/policies");
+  const state = useResource<RecordRow>(estatePath("/api/v1/policies", props.activeEstateId));
   return (
     <>
       <PageHeader
@@ -1293,7 +1398,7 @@ function PoliciesPage(props: PageProps) {
 }
 
 function AgentsPage(props: PageProps) {
-  const state = useResource<RecordRow>("/api/v1/agents");
+  const state = useResource<RecordRow>(estatePath("/api/v1/agents", props.activeEstateId));
   const pinnedRunCounts = state.data?.pinned_run_counts || {};
   return (
     <>
@@ -1331,7 +1436,7 @@ function AgentsPage(props: PageProps) {
 }
 
 function EvaluationsPage(props: PageProps) {
-  const state = useResource<RecordRow>("/api/v1/evaluations");
+  const state = useResource<RecordRow>(estatePath("/api/v1/evaluations", props.activeEstateId));
   const scale = state.data?.scale_metrics;
   return (
     <>
@@ -1401,7 +1506,7 @@ function EvaluationsPage(props: PageProps) {
 
 function HealthPage(props: PageProps) {
   const [refresh, setRefresh] = useState(0);
-  const state = useResource<RecordRow>("/api/v1/system-health", refresh);
+  const state = useResource<RecordRow>(estatePath("/api/v1/system-health", props.activeEstateId), refresh);
   return (
     <>
       <PageHeader
@@ -1482,7 +1587,7 @@ export function PageRouter(props: PageProps) {
       <Suspense
         fallback={
           <div class="page-state">
-            <span class="spinner" />
+            <ProgressBar value={-1} aria-label="Loading onboarding" />
             Loading onboarding…
           </div>
         }
@@ -1499,7 +1604,7 @@ export function PageRouter(props: PageProps) {
       <Suspense
         fallback={
           <div class="page-state">
-            <span class="spinner" />
+            <ProgressBar value={-1} aria-label="Loading lineage module" />
             Loading lineage module…
           </div>
         }
@@ -1515,7 +1620,7 @@ export function PageRouter(props: PageProps) {
       <Suspense
         fallback={
           <div class="page-state">
-            <span class="spinner" />
+            <ProgressBar value={-1} aria-label="Loading evaluations module" />
             Loading evaluation module…
           </div>
         }

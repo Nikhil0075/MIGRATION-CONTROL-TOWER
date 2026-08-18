@@ -35,7 +35,24 @@ def main() -> None:
         get_client().collection("operation_requests").document(operation_id) if operation_id else None
     )
     try:
-        report = run_assessment(str(REPO_ROOT / payload["pack_path"]))
+        def _attach_run(run_id: str) -> None:
+            if operation_ref:
+                operation_ref.set(
+                    {
+                        "status": "active",
+                        "run_id": run_id,
+                        "estate_id": payload.get("estate_id"),
+                        "result": {"run_id": run_id},
+                        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                    },
+                    merge=True,
+                )
+
+        report = run_assessment(
+            str(REPO_ROOT / payload["pack_path"]),
+            estate_id=payload.get("estate_id"),
+            on_run_created=_attach_run,
+        )
         if operation_ref:
             operation_ref.update(
                 {

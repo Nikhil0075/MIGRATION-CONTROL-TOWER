@@ -349,6 +349,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/estate-validations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Transient Estate Source
+         * @description Validate connection references before the estate is persisted.
+         */
+        post: operations["validate_transient_estate_source_api_v1_estate_validations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/assessments": {
         parameters: {
             query?: never;
@@ -513,6 +533,57 @@ export interface paths {
         };
         /** System Health */
         get: operations["system_health_api_v1_system_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Operation Status */
+        get: operations["operation_status_api_v1_operations__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Console */
+        get: operations["search_console_api_v1_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Notifications */
+        get: operations["notifications_api_v1_notifications_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -712,6 +783,12 @@ export interface components {
             /** Dataset Env */
             dataset_env?: string | null;
         };
+        /** EstateValidationRequest */
+        EstateValidationRequest: {
+            /** Estate Id */
+            estate_id: string;
+            source: components["schemas"]["EstateSourceModel"];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -751,17 +828,13 @@ export interface components {
         };
         /** StartRunRequest */
         StartRunRequest: {
-            /**
-             * Pipeline Id
-             * @default wwi.sales.customers
-             */
+            /** Pipeline Id */
             pipeline_id: string;
             /**
              * Execution Profile
              * @default wwi-default
-             * @constant
              */
-            execution_profile: "wwi-default";
+            execution_profile: string;
             /**
              * Estate Id
              * @default wwi-demo-estate
@@ -810,6 +883,11 @@ export interface components {
             justification: string;
             /** Expires At */
             expires_at?: string | null;
+            /**
+             * Estate Id
+             * @default wwi-demo-estate
+             */
+            estate_id: string;
         };
     };
     responses: never;
@@ -1428,6 +1506,41 @@ export interface operations {
             };
         };
     };
+    validate_transient_estate_source_api_v1_estate_validations_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstateValidationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     assessments_api_v1_assessments_get: {
         parameters: {
             query?: {
@@ -1741,7 +1854,9 @@ export interface operations {
     };
     agents_api_v1_agents_get: {
         parameters: {
-            query?: never;
+            query?: {
+                estate_id?: string | null;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -1772,7 +1887,9 @@ export interface operations {
     };
     evaluations_api_v1_evaluations_get: {
         parameters: {
-            query?: never;
+            query?: {
+                estate_id?: string | null;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -1803,7 +1920,109 @@ export interface operations {
     };
     system_health_api_v1_system_health_get: {
         parameters: {
+            query?: {
+                estate_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    operation_status_api_v1_operations__operation_id__get: {
+        parameters: {
             query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_console_api_v1_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                estate_id: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notifications_api_v1_notifications_get: {
+        parameters: {
+            query: {
+                estate_id: string;
+            };
             header?: {
                 authorization?: string | null;
             };

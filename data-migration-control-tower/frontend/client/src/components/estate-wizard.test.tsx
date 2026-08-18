@@ -53,6 +53,8 @@ beforeEach(() => {
   api.mockImplementation((path: string) => {
     if (path === "/api/v1/adapter-types") return Promise.resolve(envelope(ADAPTERS));
     if (path === "/api/v1/assessments") return Promise.resolve(envelope({ packs: PACKS }));
+    if (path === "/api/v1/estate-validations")
+      return Promise.resolve(envelope({ status: "NOT_APPLICABLE", detail: "Static source" }));
     return Promise.resolve(envelope({}));
   });
 });
@@ -142,7 +144,7 @@ describe("capability-driven behaviour", () => {
     expect(await screen.findByText(/supports discovery only/)).toBeTruthy();
   });
 
-  it("skips the connection step for a source with no live server", async () => {
+  it("shows a credential-free connection and validation path for a static source", async () => {
     await reachSourceStep();
     typeInto(/Source ID/, "corpus");
     const select = screen.getByLabelText(/Adapter/) as HTMLSelectElement;
@@ -151,10 +153,15 @@ describe("capability-driven behaviour", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false));
     click("Next");
 
-    // Straight to Migration Pack — no connection fields, because there is
-    // nothing to connect to.
-    expect(await screen.findByLabelText(/^Pack$/)).toBeTruthy();
+    expect(await screen.findByText(/has no server to connect to/)).toBeTruthy();
     expect(screen.queryByLabelText(/Secret Manager reference/)).toBeNull();
+    click("Next");
+    expect(await screen.findByRole("heading", { name: "Validate source" })).toBeTruthy();
+    click("Validate source");
+    expect(await screen.findByText("NOT_APPLICABLE")).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false));
+    click("Next");
+    expect(await screen.findByLabelText(/^Pack$/)).toBeTruthy();
   });
 });
 
