@@ -830,11 +830,8 @@ export interface components {
         StartRunRequest: {
             /** Pipeline Id */
             pipeline_id: string;
-            /**
-             * Execution Profile
-             * @default wwi-default
-             */
-            execution_profile: string;
+            /** Execution Profile */
+            execution_profile?: string | null;
             /**
              * Estate Id
              * @default wwi-demo-estate

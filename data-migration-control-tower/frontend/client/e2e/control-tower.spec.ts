@@ -94,6 +94,13 @@ for (const [route, title] of routes) {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`/${route}`);
     await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    // Wait for the loading spinner to clear before capturing. The heading
+    // renders before the data does, so a fullPage screenshot taken here
+    // caught a short page that then grew — the baseline was 1000px tall
+    // and a later run produced 1888px. It passed in isolation and failed
+    // in a full run, which is the worst kind of visual test: it trains
+    // people to re-run until green.
+    await expect(page.locator(".spinner")).toHaveCount(0);
     await expect(page).toHaveScreenshot(`${route}-1440.png`, { fullPage: true });
     expect(errors).toEqual([]);
   });

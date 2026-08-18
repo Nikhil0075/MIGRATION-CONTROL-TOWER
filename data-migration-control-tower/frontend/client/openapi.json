@@ -2849,11 +2849,17 @@
             "title": "Pipeline Id"
           },
           "execution_profile": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 2,
-            "title": "Execution Profile",
-            "default": "wwi-default"
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Profile"
           },
           "estate_id": {
             "type": "string",

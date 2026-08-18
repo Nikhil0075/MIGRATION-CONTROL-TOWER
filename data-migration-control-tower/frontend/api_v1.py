@@ -81,7 +81,12 @@ class StartAssessmentRequest(BaseModel):
 
 class StartRunRequest(BaseModel):
     pipeline_id: str = Field(min_length=2, max_length=200)
-    execution_profile: str = Field(default="wwi-default", min_length=2, max_length=100)
+    # No default. A profile that belongs to a different estate is exactly
+    # the cross-estate mistake this phase exists to prevent, and
+    # "wwi-default" was silently applied to every estate. Omit it and the
+    # server resolves the estate's own profile; supply one and it must be
+    # offered by that estate.
+    execution_profile: str | None = Field(default=None, min_length=2, max_length=100)
     estate_id: str = Field(default=DEFAULT_ESTATE_ID, min_length=2, max_length=100)
     justification: str = Field(min_length=8, max_length=2000)
 
@@ -1575,6 +1580,63 @@ def start_assessment(
     )
 
 
+def _execution_profiles_for(estate_id: str) -> list[str]:
+    """Execution profiles the estate's own sources declare."""
+    from tools.connection_context import EstateNotFound
+
+    try:
+        estate = _estate(estate_id)
+    except EstateNotFound:
+        return []
+    profiles: list[str] = []
+    for source in estate.get("sources", []):
+        declared = source.get("execution_profiles") or (
+            [source["pack_id"]] if source.get("pack_id") else []
+        )
+        for profile in declared:
+            if profile and profile not in profiles:
+                profiles.append(profile)
+    return profiles
+
+
+def _resolve_execution_profile(estate_id: str, requested: str | None) -> str | None:
+    """Resolves — and validates — the execution profile for one estate.
+
+    Previously this defaulted to "wwi-default" for every estate, so a run
+    started against a newly onboarded estate carried a profile belonging
+    to the demo estate. Nothing rejected it; the mismatch would only
+    surface later, in the run.
+
+    Omitted with exactly one profile available: that one is used.
+    Omitted with several: the caller must choose, rather than the server
+    picking arbitrarily.
+    """
+    available = _execution_profiles_for(estate_id)
+
+    if requested is None:
+        if len(available) == 1:
+            return available[0]
+        if not available:
+            return None
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Estate {estate_id!r} offers several execution profiles "
+                f"({sorted(available)}); name the one to use."
+            ),
+        )
+
+    if available and requested not in available:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Execution profile {requested!r} is not offered by estate "
+                f"{estate_id!r}. Available: {sorted(available)}."
+            ),
+        )
+    return requested
+
+
 @router.post("/runs", response_model=Envelope, status_code=status.HTTP_202_ACCEPTED)
 def start_run(
     body: StartRunRequest,
@@ -1582,6 +1644,7 @@ def start_run(
     user: UserContext = Depends(require_role("operator")),
 ) -> dict:
     authorize_estate(user, body.estate_id, "operator")
+    execution_profile = _resolve_execution_profile(body.estate_id, body.execution_profile)
     return _queue(
         user=user,
         kind="migration.start",
@@ -1590,7 +1653,7 @@ def start_run(
         topic="migration.requested",
         event={
             "pipeline_id": body.pipeline_id,
-            "execution_profile": body.execution_profile,
+            "execution_profile": execution_profile,
             "estate_id": body.estate_id,
             "drop_fraction": 0.0,
         },

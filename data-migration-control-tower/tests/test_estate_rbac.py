@@ -314,3 +314,73 @@ def test_estate_grant_soft_limit_is_documented():
     token stops minting. Recorded as a constant so the ceiling is visible
     rather than discovered in production."""
     assert 5 <= ESTATE_GRANT_SOFT_LIMIT <= 50
+
+
+# --- Execution profiles are estate-scoped (Day 11 Phase 9) ----------------
+
+
+def test_a_profile_from_another_estate_is_rejected(client, monkeypatch):
+    """`execution_profile` used to default to "wwi-default" for every
+    estate, so a run started against a newly onboarded estate silently
+    carried the demo estate's profile. Nothing rejected it — the mismatch
+    only surfaced later, inside the run."""
+    _token(monkeypatch, {"roles": ["operator"]})
+    monkeypatch.setattr(
+        "frontend.api_v1._execution_profiles_for",
+        lambda _estate: ["postgres_retail_v1"],
+    )
+    response = client.post(
+        "/api/v1/runs",
+        headers=_headers(**{"Idempotency-Key": "profile-mismatch-0001"}),
+        json={
+            "pipeline_id": "retail.customers",
+            "estate_id": "retail-postgres-estate",
+            "execution_profile": "wwi-default",
+            "justification": "Profile belongs to a different estate",
+        },
+    )
+    assert response.status_code == 422
+    assert "not offered by estate" in response.json()["detail"]
+
+
+def test_an_omitted_profile_resolves_to_the_estates_own(client, monkeypatch):
+    _token(monkeypatch, {"roles": ["operator"]})
+    monkeypatch.setattr(
+        "frontend.api_v1._execution_profiles_for", lambda _estate: ["postgres_retail_v1"]
+    )
+    captured = {}
+    monkeypatch.setattr(
+        "frontend.api_v1.queue_operation",
+        lambda **kwargs: captured.update(kwargs) or {"operation_id": "op", "status": "published"},
+    )
+    response = client.post(
+        "/api/v1/runs",
+        headers=_headers(**{"Idempotency-Key": "profile-resolve-0002"}),
+        json={
+            "pipeline_id": "retail.customers",
+            "estate_id": "retail-postgres-estate",
+            "justification": "Server resolves the estate's own profile",
+        },
+    )
+    assert response.status_code == 202
+    assert captured["event"]["execution_profile"] == "postgres_retail_v1"
+
+
+def test_an_ambiguous_profile_must_be_chosen_not_guessed(client, monkeypatch):
+    """With several profiles the server names them rather than picking
+    one arbitrarily."""
+    _token(monkeypatch, {"roles": ["operator"]})
+    monkeypatch.setattr(
+        "frontend.api_v1._execution_profiles_for", lambda _estate: ["a_v1", "b_v1"]
+    )
+    response = client.post(
+        "/api/v1/runs",
+        headers=_headers(**{"Idempotency-Key": "profile-ambiguous-0003"}),
+        json={
+            "pipeline_id": "x.y",
+            "estate_id": "multi-profile-estate",
+            "justification": "Ambiguous execution profile",
+        },
+    )
+    assert response.status_code == 422
+    assert "name the one to use" in response.json()["detail"]
