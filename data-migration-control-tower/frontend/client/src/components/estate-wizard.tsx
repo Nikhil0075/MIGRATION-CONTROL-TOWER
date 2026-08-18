@@ -59,6 +59,30 @@ const STEPS = [
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 const SOURCE_SLUG = /^[a-z0-9][a-z0-9._-]*$/;
 
+/** A valid id derived from what the operator actually typed. */
+function toSlug(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Names what is wrong with THIS input, not the rule in the abstract.
+ *
+ * The rule was already stated under the field, and someone still typed
+ * "acme finance" and could not tell why Next stayed disabled: a space is
+ * invisible in an error that only recites which characters are allowed.
+ * Saying "spaces are not allowed" — and offering "acme-finance" — is the
+ * difference between a rule and an answer.
+ */
+function slugProblem(raw: string): string | null {
+  if (!raw || SLUG.test(raw)) return null;
+  if (/\s/.test(raw)) return "Spaces are not allowed.";
+  if (/[A-Z]/.test(raw)) return "Capital letters are not allowed.";
+  if (/^[^a-z0-9]/.test(raw)) return "It must start with a lowercase letter or digit.";
+  return "Only lowercase letters, digits and hyphens are allowed.";
+}
+
 let fieldSequence = 0;
 
 function Field({
@@ -265,8 +289,22 @@ export function EstateWizard({ session, navigate, estateRoles, onEstateCreated, 
           </Field>
           {estateId && !SLUG.test(estateId) && (
             <p class="notice notice-error" role="alert">
-              An estate ID may contain only lowercase letters, digits and
-              hyphens, and must start with a letter or digit.
+              {slugProblem(estateId)}{" "}
+              {toSlug(estateId) ? (
+                <>
+                  Use{" "}
+                  <button
+                    type="button"
+                    class="link-button"
+                    onClick={() => setEstateId(toSlug(estateId))}
+                  >
+                    {toSlug(estateId)}
+                  </button>{" "}
+                  instead.
+                </>
+              ) : (
+                "An estate ID may contain only lowercase letters, digits and hyphens."
+              )}
             </p>
           )}
           <Field label="Display name">

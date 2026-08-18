@@ -303,3 +303,8 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 .inline-alert.warning { border-left-color: var(--mct-warning); }
 .inline-alert.danger { border-left-color: var(--mct-danger); }
 .inline-alert code { font-family: ui-monospace, monospace; font-size: .72rem; }
+
+/* An inline suggestion the operator can apply, rather than retype. */
+.link-button { border: 0; padding: 0; background: none; color: var(--mct-red); font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; }
+.link-button:hover { color: var(--mct-red-dark); }
+.link-button:focus-visible { outline: 2px solid var(--mct-focus); outline-offset: 2px; border-radius: 2px; }

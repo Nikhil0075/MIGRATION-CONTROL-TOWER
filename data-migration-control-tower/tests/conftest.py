@@ -100,6 +100,23 @@ def postgres_reachable() -> bool:
 
 
 @functools.lru_cache(maxsize=1)
+def pubsub_reachable() -> bool:
+    try:
+        import os
+
+        from google.cloud import pubsub_v1
+
+        project = os.environ.get("GCP_PROJECT_ID")
+        if not project:
+            return False
+        next(iter(pubsub_v1.PublisherClient().list_topics(
+            request={"project": f"projects/{project}"})), None)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+@functools.lru_cache(maxsize=1)
 def bigquery_reachable() -> bool:
     try:
         from tools.bigquery_tools import get_client
@@ -115,6 +132,7 @@ _PROBES = {
     "requires_sqlserver": (sqlserver_reachable, "SQL Server container not reachable"),
     "requires_postgres": (postgres_reachable, "Postgres fixture container not reachable"),
     "requires_bigquery": (bigquery_reachable, "BigQuery not reachable"),
+    "requires_pubsub": (pubsub_reachable, "Pub/Sub not reachable"),
 }
 
 

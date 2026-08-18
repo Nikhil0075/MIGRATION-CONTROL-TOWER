@@ -119,8 +119,9 @@ describe("step gating", () => {
     await waitFor(() =>
       expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true),
     );
-    // ...and says why, rather than leaving the button mysteriously dead.
-    expect(screen.getByRole("alert").textContent).toMatch(/lowercase letters, digits and hyphens/i);
+    // ...and says what is wrong with THIS value, rather than reciting the
+    // rule and leaving the button mysteriously dead.
+    expect(screen.getByRole("alert").textContent).toMatch(/Spaces are not allowed/i);
   });
 });
 
@@ -170,5 +171,46 @@ describe("authorization", () => {
     const viewer = { ...operator, roles: ["viewer"] };
     render(<EstateWizard {...props} session={viewer} />);
     expect(await screen.findByText(/requires the operator role/)).toBeTruthy();
+  });
+});
+
+describe("estate id guidance", () => {
+  it("names the actual problem instead of reciting the rule", async () => {
+    render(<EstateWizard {...props} />);
+    await screen.findByLabelText(/Estate ID/);
+    typeInto(/Estate ID/, "acme finance");
+
+    // The rule was already printed under the field and someone still could
+    // not see that a space was the problem.
+    expect(await screen.findByText(/Spaces are not allowed/)).toBeTruthy();
+  });
+
+  it("offers a valid id derived from what was typed", async () => {
+    render(<EstateWizard {...props} />);
+    await screen.findByLabelText(/Estate ID/);
+    typeInto(/Estate ID/, "acme finance");
+
+    const suggestion = await screen.findByRole("button", { name: "acme-finance" });
+    suggestion.click();
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(/Estate ID/) as HTMLInputElement).value).toBe("acme-finance"),
+    );
+  });
+
+  it("applying the suggestion unblocks the step", async () => {
+    render(<EstateWizard {...props} />);
+    await screen.findByLabelText(/Estate ID/);
+    typeInto(/Estate ID/, "Acme Finance");
+    typeInto(/Display name/, "Acme Finance");
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true),
+    );
+
+    (await screen.findByRole("button", { name: "acme-finance" })).click();
+
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false),
+    );
   });
 });
