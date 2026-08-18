@@ -1,0 +1,30 @@
+# Second-estate fixture (Day 11 Phase 7, master doc §32.11).
+#
+# The reproducibility claim this project makes is not "the WideWorldImporters
+# demo replays". It is "a different estate can be connected through
+# configuration, without editing the agent fleet". That claim needs a second
+# source that is genuinely a different database engine, so this is a real
+# PostgreSQL instance rather than another SQL Server database.
+#
+# Port 5433, not 5432: a developer machine very often already runs Postgres
+# on 5432, and a fixture that silently connects to someone's real local
+# database is a worse failure than one that refuses to start.
+services:
+  retail-postgres:
+    image: postgres:16-alpine
+    container_name: retail-postgres
+    environment:
+      POSTGRES_USER: postgres
+      # Overridable, matching simulator/source_setup/docker-compose.yml —
+      # so changing the fixture password does not mean editing this file.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-ChangeMe_Str0ng!}"
+      POSTGRES_DB: retaildb
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d retaildb"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

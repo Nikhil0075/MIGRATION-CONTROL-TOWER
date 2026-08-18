@@ -1,0 +1,14 @@
+.git
+.github
+.pytest_cache
+**/__pycache__
+**/*.pyc
+.env
+*.env
+.venv
+venv
+frontend/client/node_modules
+frontend/client/web
+frontend/static/firebase-config.js
+evaluation/reports/*.tmp
+*.log

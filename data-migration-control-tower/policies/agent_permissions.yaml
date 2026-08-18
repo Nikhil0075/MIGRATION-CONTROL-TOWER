@@ -1,0 +1,85 @@
+# Ceiling permissions per agent identity, per master doc §4.2 and §20.1.
+#
+# Day 1-2 status: this file is DECLARED but not yet enforced by a policy
+# decision point in the tool-call path (that lands with the Risk agent
+# and the deterministic policy engine on Tue 18 Aug, per §17.1). Today it
+# documents the intended boundary so Discovery is built against it from
+# the start.
+#
+# data_classes: METADATA | MASKED | PII | PRODUCTION
+# decision:     ALLOW | DENY | REQUIRE_APPROVAL
+
+orchestrator:
+  allowed_tools:
+    - firestore.write_run_state
+    - registry.resolve   # placeholder for Block C; unused until then
+  denied_tools:
+    - production.write
+
+discovery:
+  allowed_tools:
+    - source.catalog.sql_server
+    - source.catalog.oracle_corpus
+    - source.catalog.dag_artifacts
+    - firestore.write_catalog
+  denied_tools:
+    - source.raw_pii_read
+    - target.write
+    - production.write
+  data_classes:
+    - METADATA
+
+lineage:
+  allowed_tools:
+    - source.catalog.read   # metadata + code read only
+    - lineage.graph.write
+  denied_tools:
+    - source.raw_pii_read
+    - production.write
+    - iam.modify
+  data_classes:
+    - METADATA
+
+risk:
+  allowed_tools:
+    - source.sample.masked
+    - schema.metadata.read
+    - policy.catalog.read
+  denied_tools:
+    - production.write
+    - secret.read
+  data_classes:
+    - METADATA
+    - MASKED
+
+planner:
+  allowed_tools:
+    - schema.metadata.read
+    - sql.translate
+    - plan.write
+  denied_tools:
+    - production.cutover
+  data_classes:
+    - METADATA
+
+validation:
+  allowed_tools:
+    - source.query.masked
+    - target.query.masked
+    - hash.compute
+  denied_tools:
+    - target.ddl
+  data_classes:
+    - METADATA
+    - MASKED
+
+cutover:
+  allowed_tools:
+    - migration.execute.approved
+    - cutover.execute.approved
+  denied_tools:
+    - approval.self_issue
+    - source.raw_pii_read
+  approval_required_actions:
+    - production.write
+    - cutover.execute.approved

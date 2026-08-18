@@ -1,0 +1,159 @@
+:root {
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --panel-border: #334155;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --purple: #a78bfa;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 24px;
+  background: #111827;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+header h1 { font-size: 18px; margin: 0; }
+
+nav { display: flex; gap: 8px; }
+
+#auth-box {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+#auth-box .hint { color: var(--muted); }
+#auth-box button {
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--muted);
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#auth-box button:hover { color: #fff; border-color: #fff; }
+
+.tab-btn, .subtab-btn {
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tab-btn.active, .subtab-btn.active {
+  background: var(--accent);
+  color: #0f172a;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+
+.tab-panel, .subtab-panel { display: none; }
+.tab-panel.active, .subtab-panel.active { display: block; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+.panel h2 { margin-top: 0; font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+
+.stat-row { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+.stat-card {
+  flex: 1;
+  min-width: 130px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.stat-card .value { font-size: 26px; font-weight: 700; }
+.stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+.stat-card.health-HEALTHY .value { color: var(--green); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--panel-border); }
+th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: rgba(56,189,248,0.08); }
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.badge-COMPLETE, .badge-PASSED, .badge-APPROVED, .badge-ALLOW, .badge-HEALTHY, .badge-RESOLVED, .badge-CONTAINED { background: rgba(34,197,94,.15); color: var(--green); }
+.badge-FAILED, .badge-DENY, .badge-DEGRADED, .badge-UNRESOLVED { background: rgba(239,68,68,.15); color: var(--red); }
+.badge-INVESTIGATING, .badge-REMEDIATING, .badge-VALIDATING, .badge-MIGRATING, .badge-REQUIRE_APPROVAL, .badge-PENDING { background: rgba(245,158,11,.15); color: var(--amber); }
+.badge-READY_FOR_APPROVAL { background: rgba(167,139,250,.2); color: var(--purple); }
+.badge-DEPRECATED { background: rgba(148,163,184,.2); color: var(--muted); }
+
+.timeline { list-style: none; padding: 0; margin: 0; }
+.timeline li {
+  position: relative;
+  padding: 6px 0 6px 22px;
+  border-left: 2px solid var(--panel-border);
+  margin-left: 6px;
+  font-size: 13px;
+}
+.timeline li::before {
+  content: "";
+  position: absolute;
+  left: -7px; top: 10px;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.timeline li .ts { color: var(--muted); font-size: 11px; margin-left: 8px; }
+
+.fixture-flag { color: var(--amber); font-weight: 700; }
+
+button.approve-btn {
+  background: var(--green);
+  color: #04250f;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  margin: 10px 0;
+}
+button.approve-btn:hover { opacity: .9; }
+
+.hint { color: var(--muted); font-size: 12px; }
+
+.finding-card {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.finding-card .ft { font-weight: 700; }

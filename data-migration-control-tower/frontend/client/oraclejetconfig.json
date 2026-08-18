@@ -1,0 +1,25 @@
+{
+  "paths": {
+    "source": {
+      "common": "src",
+      "web": "src-web",
+      "javascript": ".",
+      "typescript": ".",
+      "styles": "styles",
+      "themes": "themes",
+      "components": "components",
+      "exchangeComponents": "exchange_components"
+    },
+    "staging": { "web": "web", "themes": "staged-themes" }
+  },
+  "unversioned": true,
+  "generateSourceMaps": false,
+  "defaultBrowser": "chrome",
+  "sassVer": "1.80.5",
+  "defaultTheme": "redwood",
+  "fontUrl": "",
+  "typescriptLibraries": "typescript@5.8.3 yargs-parser@~13.1.2",
+  "webpackLibraries": "webpack@5.101.0 @types/node@18.16.3 webpack-dev-server style-loader css-loader sass-loader sass ts-loader@8.4.0 raw-loader noop-loader html-webpack-plugin html-replace-webpack-plugin copy-webpack-plugin @prefresh/webpack @prefresh/babel-plugin webpack-merge compression-webpack-plugin mini-css-extract-plugin clean-webpack-plugin css-fix-url-loader",
+  "defaultWebpackOjL10nLocale": "en-US",
+  "architecture": "vdom"
+}

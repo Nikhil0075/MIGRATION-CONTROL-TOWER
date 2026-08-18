@@ -1,0 +1,35 @@
+# Wave Manager scheduling limits (Day 10 Phase 4, master doc §32.12).
+# Read by tools/wave_manager.py — an operator changes concurrency
+# behavior by editing this file, not by editing Python, the same
+# discipline as policies/agent_permissions.yaml and
+# policies/reconciliation_tolerances.yaml.
+
+# Max concurrent in-flight transfers per source_id (estate.yaml's
+# source_id values). "default" applies to any source_id not listed
+# explicitly.
+max_concurrent_per_source:
+  wwi-sqlserver: 2
+  oracle-corpus: 1
+  default: 1
+
+# Global cap on how many CRITICAL-risk pipelines may run concurrently,
+# regardless of source — a CRITICAL_DEPENDENCY finding (tools/risk
+# agent) means this pipeline feeds something downstream cares about;
+# running too many of those at once is exactly the kind of blast-radius
+# risk a Wave Manager exists to bound.
+max_concurrent_critical: 1
+
+# A run waiting longer than this is promoted ahead of same-priority
+# peers in the next wave-admission pass (deterministic priority boost,
+# never a scoring model) — see tools/wave_manager.py::evaluate_wave().
+backlog_age_escalation_minutes: 30
+
+# Cutover (and, by extension, any wave admission gated on it) can be
+# restricted to a declared UTC hour window — e.g. business hours only,
+# so a cutover never lands unattended overnight. Disabled by default:
+# this project's own demo/evaluation runs must not be blocked by wall-
+# clock time; a real deployment would flip this on and set real hours.
+approval_window:
+  enabled: false
+  start_hour_utc: 13  # ~9am ET
+  end_hour_utc: 21    # ~5pm ET

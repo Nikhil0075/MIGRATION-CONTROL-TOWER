@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Autonomous Data Migration Control Tower</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<!-- Day 10 hardening: real sign-in for the approval action (§5.2). Compat
+     build so this stays a plain static page with no bundler/build step. -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="/static/firebase-config.js"></script>
+</head>
+<body>
+  <header>
+    <h1>🗼 Autonomous Data Migration Control Tower</h1>
+    <nav>
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="runs">Runs</button>
+      <button class="tab-btn" data-tab="registry">Agent Registry</button>
+    </nav>
+    <div id="auth-box">
+      <span id="auth-status" class="hint">Not signed in</span>
+      <button id="signin-btn" type="button">Sign in with Google</button>
+      <button id="signout-btn" type="button" style="display:none">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== DASHBOARD ===================== -->
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="stat-row" id="stat-row"></div>
+
+      <div class="panel" id="active-run-panel">
+        <h2>Active Run</h2>
+        <div id="active-run-content">Loading…</div>
+      </div>
+    </section>
+
+    <!-- ===================== RUNS ===================== -->
+    <section id="tab-runs" class="tab-panel">
+      <div class="panel">
+        <h2>Migration Runs</h2>
+        <table id="runs-table">
+          <thead><tr><th>Run ID</th><th>Pipeline</th><th>State</th><th>Created</th><th>Fixture?</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="panel" id="run-detail-panel" style="display:none">
+        <h2 id="run-detail-title">Run detail</h2>
+        <div id="run-approve-box"></div>
+
+        <div class="subtabs">
+          <button class="subtab-btn active" data-subtab="timeline">Timeline</button>
+          <button class="subtab-btn" data-subtab="lineage">Lineage Graph</button>
+          <button class="subtab-btn" data-subtab="reconciliation">Reconciliation</button>
+          <button class="subtab-btn" data-subtab="audit">Audit Trail</button>
+        </div>
+
+        <div id="sub-timeline" class="subtab-panel active"></div>
+        <div id="sub-lineage" class="subtab-panel">
+          <div id="lineage-graph" style="height:480px;border:1px solid #ccc;"></div>
+          <p class="hint">Node color: table classification (red=PII, grey=metadata). Diamond = pipeline. Edge label: relationship (confidence).</p>
+        </div>
+        <div id="sub-reconciliation" class="subtab-panel"></div>
+        <div id="sub-audit" class="subtab-panel"></div>
+      </div>
+    </section>
+
+    <!-- ===================== REGISTRY ===================== -->
+    <section id="tab-registry" class="tab-panel">
+      <div class="panel">
+        <h2>Agent Registry</h2>
+        <div id="registry-content">Loading…</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/auth.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

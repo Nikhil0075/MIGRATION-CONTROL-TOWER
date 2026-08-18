@@ -1,0 +1,183 @@
+import AxeBuilder from "@axe-core/playwright";
+import { expect, Page, test } from "@playwright/test";
+
+const generatedAt = "2026-08-17T10:00:00Z";
+
+const routes = [
+  ["overview", "Overview"],
+  ["estates", "Estates"],
+  ["assessments", "Assessments"],
+  ["waves", "Wave Manager"],
+  ["runs", "Runs"],
+  ["lineage", "Lineage"],
+  ["reconciliation", "Reconciliation"],
+  ["policies", "Policies & Approvals"],
+  ["agents", "Agents"],
+  ["evaluations", "Evaluations"],
+  ["system-health", "System Health"],
+] as const;
+
+const fixtureByPath: Record<string, unknown> = {
+  "/api/v1/adapter-types": [
+    { adapter_type: "sqlserver", capabilities: ["discover", "health", "reconcile", "transfer"] },
+    { adapter_type: "oracle_corpus", capabilities: ["discover"] },
+  ],
+  "/api/v1/overview": {
+    fleet_health: "HEALTHY",
+    estate: { objects: 58, pipelines: 4, sources: [{ source_id: "wwi-sqlserver", health: "HEALTHY" }] },
+    runs: { migrated_percent: 100, complete: 1, active: 0 },
+    waves: { queued_operations: 0 },
+    policy_denials: 2,
+    recovery_rate: 1,
+    human_interventions: 1,
+    estimated_cost: { status: "not_configured", reason: "Measured usage is unavailable." },
+    actual_cost: { status: "not_configured", reason: "Billing export not configured." },
+    estimated_bytes: { status: "not_configured", reason: "Job byte telemetry is unavailable." },
+    latency: {},
+  },
+  "/api/v1/estates": [{ estate_id: "wwi", display_name: "Worldwide Importers", owner: "Data Platform", health: "HEALTHY", objects: 58, pipelines: 4, sources: [], target: { system: "BigQuery", dataset_env: "Production" } }],
+  "/api/v1/assessments": { packs: [{ pack_id: "wwi", label: "WWI", execution_supported: true }], runs: [] },
+  "/api/v1/waves": {
+    state: { running_critical: [], running_by_source: {} },
+    limits: { max_concurrent_critical: 1, max_concurrent_per_source: {}, backlog_age_escalation_minutes: 30, approval_window: { enabled: true } },
+    oldest_backlog_age_ms: null,
+    queued: [], blocked: [], overrides: [], events: [],
+  },
+  "/api/v1/runs": [{ run_id: "run-live", state: "COMPLETE", mode: "execution", updated_at: generatedAt }],
+  "/api/v1/lineage": { nodes: [{ id: "source.orders", label: "Orders", classification: "PII", confidence: 0.98 }], edges: [] },
+  "/api/v1/reconciliation": [{ run_id: "run-live", status: "PASSED", delta: 0, tolerance: 0 }],
+  "/api/v1/policies": { decisions: [{ policy_id: "cutover-approval", decision: "ALLOW", acting_identity: "approver@example.test" }], approvals: [] },
+  "/api/v1/agents": { cards: [{ agent_id: "orchestrator", version: "1.0.0", status: "HEALTHY", owner: "Data Platform" }], pinned_run_counts: {} },
+  "/api/v1/evaluations": { runs: [{ scenario: "full-migration", status: "PASSED" }], scale_metrics: null, scale_report_reason: "No persisted scale report." },
+  "/api/v1/system-health": { build_version: "e2e", services: [{ service: "Cloud Run", status: "HEALTHY", freshness: generatedAt }] },
+};
+
+async function installApiFixtures(page: Page) {
+  await page.route("**/api/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const data = url.pathname === "/api/v1/config"
+      ? {
+          product_name: "Migration Control Tower",
+          build_version: "e2e",
+          poll_interval_ms: 30_000,
+          authentication_configured: true,
+          firebase: {},
+        }
+      : fixtureByPath[url.pathname] ?? [];
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data, meta: { generated_at: generatedAt, freshness: "live" } }),
+    });
+  });
+}
+
+for (const [route, title] of routes) {
+  test(`${title} route renders and matches its desktop snapshot`, async ({ page }) => {
+    await installApiFixtures(page);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(`/${route}`);
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    await expect(page).toHaveScreenshot(`${route}-1440.png`, { fullPage: true });
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const width of [1440, 1024, 768, 390]) {
+  test(`responsive shell at ${width}px`, async ({ page }) => {
+    await installApiFixtures(page);
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/overview");
+    await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+    const overflows = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    expect(overflows).toBe(false);
+  });
+}
+
+test("keyboard navigation and WCAG audit", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/overview");
+
+  // Press Tab THROUGH the body rather than via page.keyboard, and bring the
+  // page to front first. page.keyboard delivers to whatever the browser
+  // considers focused; with parallel workers sharing a machine the page is
+  // often not the focused window, so the key went nowhere and :focus stayed
+  // empty. That made this assertion pass serially and fail in parallel —
+  // a flaky accessibility test is worse than none, because it trains people
+  // to re-run until green.
+  await page.bringToFront();
+  await page.locator("body").press("Tab");
+
+  const focused = page.locator(":focus");
+  await expect(focused).toBeVisible();
+  // The first stop must be the skip link — keyboard users should reach the
+  // workspace without tabbing through the whole command bar.
+  await expect(focused).toHaveText(/Skip to operational workspace/i);
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("tables expose accessible controls and never encode status by color alone", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.goto("/runs");
+  await expect(page.getByRole("table")).toBeVisible();
+  await expect(page.getByText("COMPLETE", { exact: true })).toBeVisible();
+  await expect(page.locator(".status-pill .status-dot")).toHaveAttribute("aria-hidden", "true");
+  await expect(page.locator("summary", { hasText: "Columns" })).toBeVisible();
+});
+
+
+// --- Estate onboarding wizard (Day 11 Phase 6) --------------------------
+
+test("estate onboarding wizard walks its steps and never offers a password field", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+
+  // A nested deep link. Every other route in this app is a single
+  // segment, so this is the only test that would catch relative asset
+  // paths resolving against /estates/ instead of the origin — the bug
+  // that made this route serve index.html for its own JavaScript.
+  await page.goto("/estates/new");
+  await expect(page.getByRole("heading", { name: "Onboard an estate", exact: true })).toBeVisible();
+
+  // Step 1 gates on a valid identity.
+  const next = page.getByRole("button", { name: "Next", exact: true });
+  await expect(next).toBeDisabled();
+  await page.getByLabel("Estate ID").fill("acme-finance");
+  await page.getByLabel("Display name").fill("ACME Finance");
+  await expect(next).toBeEnabled();
+  await next.click();
+
+  // Step 2 lists adapters fetched from the API, not a hardcoded list.
+  await expect(page.getByText("Source", { exact: true }).first()).toBeVisible();
+  await page.getByLabel("Source ID").fill("finance-sqlserver");
+  await page.getByLabel("Adapter").selectOption("sqlserver");
+  await next.click();
+
+  // Step 3 collects REFERENCES. This assertion is the point of the test.
+  await expect(page.getByLabel("Password — Secret Manager reference")).toBeVisible();
+  expect(await page.locator("input[type=password]").count()).toBe(0);
+
+  expect(errors).toEqual([]);
+});
+
+test("an assessment-only adapter skips the connection step", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.goto("/estates/new");
+  await page.getByLabel("Estate ID").fill("corpus-estate");
+  await page.getByLabel("Display name").fill("Corpus estate");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByLabel("Source ID").fill("corpus");
+  await page.getByLabel("Adapter").selectOption("oracle_corpus");
+
+  // Declared capabilities drive the UI: no live server means no
+  // connection step, and the limitation is stated rather than implied.
+  await expect(page.getByText(/supports discovery only/)).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByText("Migration Pack", { exact: true }).first()).toBeVisible();
+});

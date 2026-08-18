@@ -1,0 +1,46 @@
+# Estate configuration (Day 10 Phase 3, master doc §32 — "build the
+# pattern, not the scale"). Declares the sources that make up this
+# project's own demo estate, each paired with the SourceAdapter type
+# (tools/adapters/) that knows how to talk to it.
+#
+# `config:` keys are passed straight through as kwargs to that adapter's
+# constructor (tools/adapters/__init__.py::build_adapter) — see each
+# adapter class for what it accepts.
+#
+# Connection secrets: `password_secret_ref` names a secret this project
+# would resolve from Secret Manager in a real deployment. Today's local-
+# dev reality (see tools/sqlserver_client.py) resolves credentials from
+# `.env` instead — documented honestly as a gap, not silently faked. A
+# real deployment with real Secret Manager-stored credentials needs a
+# second live data source to prove against, which is out of this
+# project's demonstrated scope (see the Day 10 hardening plan).
+
+estate_id: wwi-demo-estate
+display_name: "WideWorldImporters demo estate"
+
+sources:
+  - source_id: wwi-sqlserver
+    adapter: sqlserver
+    config:
+      database: WideWorldImporters
+    connection_profile:
+      host_env: SQLSERVER_HOST
+      port_env: SQLSERVER_PORT
+      user_env: SQLSERVER_USER
+      password_secret_ref: sqlserver-wwi-password  # falls back to SQLSERVER_PASSWORD in .env — see note above
+
+  - source_id: oracle-corpus
+    adapter: oracle_corpus
+    config:
+      corpus_path: simulator/source_setup/oracle_dialect_corpus
+    connection_profile: null  # static files, no live connection (§18.3)
+
+  - source_id: dag-artifacts
+    adapter: dag_artifacts
+    config:
+      dag_path: simulator/source_setup/dags
+    connection_profile: null  # static files, no live connection
+
+target:
+  system: bigquery
+  dataset_env: BQ_DATASET  # falls back to "migration_target" — see tools/bigquery_tools.py

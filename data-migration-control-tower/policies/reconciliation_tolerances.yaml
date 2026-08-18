@@ -1,0 +1,18 @@
+# Reconciliation tolerances (Day 10, master doc Appendix D, S-06: "Null
+# drift beyond tolerance ... tolerance is configured, not hardcoded").
+#
+# tools/reconciliation.py::default_null_tolerance() reads this file so an
+# operator changes accepted drift by editing this YAML, not by editing
+# Python. Every check_* function in reconciliation.py still accepts an
+# explicit `tolerance` argument that overrides this default per call —
+# this file only supplies the value when the caller doesn't pass one.
+
+null_profile:
+  # Maximum absolute difference between source and target null counts
+  # for a single reconciliation check to still PASS. 0 means "any drift
+  # fails" (the pre-Day-10 behavior); raised here to a small non-zero
+  # value because a handful of nulls introduced by legitimate type
+  # coercion during load (e.g. an empty string normalized to NULL) is a
+  # different failure class than the seeded row-loss defect this project
+  # already handles via the recovery loop.
+  default_tolerance: 2

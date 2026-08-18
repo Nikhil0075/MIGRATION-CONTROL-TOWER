@@ -1,0 +1,3473 @@
+[
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CityID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "CityName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StateProvinceID"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "Location"
+   },
+   {
+    "data_type": "bigint",
+    "is_nullable": true,
+    "name": "LatestRecordedPopulation"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "CityID"
+  ],
+  "row_count_baseline": 37940,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "Cities",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.Cities"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CityID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "CityName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StateProvinceID"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "Location"
+   },
+   {
+    "data_type": "bigint",
+    "is_nullable": true,
+    "name": "LatestRecordedPopulation"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 28,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "Cities_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.Cities_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CountryID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "CountryName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "FormalName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "IsoAlpha3Code"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "IsoNumericCode"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "CountryType"
+   },
+   {
+    "data_type": "bigint",
+    "is_nullable": true,
+    "name": "LatestRecordedPopulation"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "Continent"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "Region"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "Subregion"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "Border"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "CountryID"
+  ],
+  "row_count_baseline": 190,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "Countries",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.Countries"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CountryID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "CountryName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "FormalName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "IsoAlpha3Code"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "IsoNumericCode"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "CountryType"
+   },
+   {
+    "data_type": "bigint",
+    "is_nullable": true,
+    "name": "LatestRecordedPopulation"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "Continent"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "Region"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "Subregion"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "Border"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 37,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "Countries_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.Countries_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryMethodID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryMethodName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "DeliveryMethodID"
+  ],
+  "row_count_baseline": 10,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "DeliveryMethods",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.DeliveryMethods"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryMethodID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryMethodName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 1,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "DeliveryMethods_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.DeliveryMethods_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PaymentMethodID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PaymentMethodName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "PaymentMethodID"
+  ],
+  "row_count_baseline": 4,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "PaymentMethods",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.PaymentMethods"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PaymentMethodID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PaymentMethodName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 1,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "PaymentMethods_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.PaymentMethods_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PersonID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "FullName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PreferredName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SearchName"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsPermittedToLogon"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "LogonName"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsExternalLogonProvider"
+   },
+   {
+    "data_type": "varbinary",
+    "is_nullable": true,
+    "name": "HashedPassword"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsSystemUser"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsEmployee"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsSalesperson"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "UserPreferences"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "PhoneNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "FaxNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "EmailAddress"
+   },
+   {
+    "data_type": "varbinary",
+    "is_nullable": true,
+    "name": "Photo"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "CustomFields"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "OtherLanguages"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "PersonID"
+  ],
+  "row_count_baseline": 1111,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "People",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.People"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PersonID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "FullName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PreferredName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SearchName"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsPermittedToLogon"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "LogonName"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsExternalLogonProvider"
+   },
+   {
+    "data_type": "varbinary",
+    "is_nullable": true,
+    "name": "HashedPassword"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsSystemUser"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsEmployee"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsSalesperson"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "UserPreferences"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "PhoneNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "FaxNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "EmailAddress"
+   },
+   {
+    "data_type": "varbinary",
+    "is_nullable": true,
+    "name": "Photo"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "CustomFields"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "OtherLanguages"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 961,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "People_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.People_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StateProvinceID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "StateProvinceCode"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "StateProvinceName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CountryID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SalesTerritory"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "Border"
+   },
+   {
+    "data_type": "bigint",
+    "is_nullable": true,
+    "name": "LatestRecordedPopulation"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "StateProvinceID"
+  ],
+  "row_count_baseline": 53,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "StateProvinces",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.StateProvinces"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StateProvinceID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "StateProvinceCode"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "StateProvinceName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CountryID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SalesTerritory"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "Border"
+   },
+   {
+    "data_type": "bigint",
+    "is_nullable": true,
+    "name": "LatestRecordedPopulation"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 104,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "StateProvinces_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.StateProvinces_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SystemParameterID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryAddressLine2"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryCityID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryPostalCode"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": false,
+    "name": "DeliveryLocation"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "PostalAddressLine2"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PostalCityID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalPostalCode"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "ApplicationSettings"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "SystemParameterID"
+  ],
+  "row_count_baseline": 1,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "SystemParameters",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.SystemParameters"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "TransactionTypeID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "TransactionTypeName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "TransactionTypeID"
+  ],
+  "row_count_baseline": 13,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "TransactionTypes",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.TransactionTypes"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "TransactionTypeID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "TransactionTypeName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 1,
+  "schema": "Application",
+  "system": "sqlserver-wwi",
+  "table": "TransactionTypes_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Application.TransactionTypes_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PurchaseOrderLineID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PurchaseOrderID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "OrderedOuters"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "Description"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ReceivedOuters"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PackageTypeID"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "ExpectedUnitPricePerOuter"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": true,
+    "name": "LastReceiptDate"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsOrderLineFinalized"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "PurchaseOrderLineID"
+  ],
+  "row_count_baseline": 8367,
+  "schema": "Purchasing",
+  "system": "sqlserver-wwi",
+  "table": "PurchaseOrderLines",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Purchasing.PurchaseOrderLines"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PurchaseOrderID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierID"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "OrderDate"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryMethodID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ContactPersonID"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": true,
+    "name": "ExpectedDeliveryDate"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "SupplierReference"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsOrderFinalized"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Comments"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "InternalComments"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "PurchaseOrderID"
+  ],
+  "row_count_baseline": 2074,
+  "schema": "Purchasing",
+  "system": "sqlserver-wwi",
+  "table": "PurchaseOrders",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Purchasing.PurchaseOrders"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierCategoryID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SupplierCategoryName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "SupplierCategoryID"
+  ],
+  "row_count_baseline": 9,
+  "schema": "Purchasing",
+  "system": "sqlserver-wwi",
+  "table": "SupplierCategories",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Purchasing.SupplierCategories"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierCategoryID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SupplierCategoryName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 1,
+  "schema": "Purchasing",
+  "system": "sqlserver-wwi",
+  "table": "SupplierCategories_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Purchasing.SupplierCategories_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierTransactionID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "TransactionTypeID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "PurchaseOrderID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "PaymentMethodID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "SupplierInvoiceNumber"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "TransactionDate"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "AmountExcludingTax"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TaxAmount"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TransactionAmount"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "OutstandingBalance"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": true,
+    "name": "FinalizationDate"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": true,
+    "name": "IsFinalized"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "SupplierTransactionID"
+  ],
+  "row_count_baseline": 2438,
+  "schema": "Purchasing",
+  "system": "sqlserver-wwi",
+  "table": "SupplierTransactions",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Purchasing.SupplierTransactions"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SupplierName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierCategoryID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PrimaryContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "AlternateContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "DeliveryMethodID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryCityID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PostalCityID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "SupplierReference"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankAccountName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankAccountBranch"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankAccountCode"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankAccountNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankInternationalCode"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PaymentDays"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "InternalComments"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PhoneNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "FaxNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "WebsiteURL"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryAddressLine2"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryPostalCode"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "DeliveryLocation"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "PostalAddressLine2"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalPostalCode"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "SupplierID"
+  ],
+  "row_count_baseline": 13,
+  "schema": "Purchasing",
+  "system": "sqlserver-wwi",
+  "table": "Suppliers",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Purchasing.Suppliers"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SupplierName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierCategoryID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PrimaryContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "AlternateContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "DeliveryMethodID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryCityID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PostalCityID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "SupplierReference"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankAccountName"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankAccountBranch"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankAccountCode"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankAccountNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "BankInternationalCode"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PaymentDays"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "InternalComments"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PhoneNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "FaxNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "WebsiteURL"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryAddressLine2"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryPostalCode"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "DeliveryLocation"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "PostalAddressLine2"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalPostalCode"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 13,
+  "schema": "Purchasing",
+  "system": "sqlserver-wwi",
+  "table": "Suppliers_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Purchasing.Suppliers_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "BuyingGroupID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "BuyingGroupName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "BuyingGroupID"
+  ],
+  "row_count_baseline": 2,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "BuyingGroups",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.BuyingGroups"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "BuyingGroupID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "BuyingGroupName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 0,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "BuyingGroups_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.BuyingGroups_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerCategoryID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "CustomerCategoryName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "CustomerCategoryID"
+  ],
+  "row_count_baseline": 8,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "CustomerCategories",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.CustomerCategories"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerCategoryID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "CustomerCategoryName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 1,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "CustomerCategories_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.CustomerCategories_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerTransactionID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "TransactionTypeID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "InvoiceID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "PaymentMethodID"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "TransactionDate"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "AmountExcludingTax"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TaxAmount"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TransactionAmount"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "OutstandingBalance"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": true,
+    "name": "FinalizationDate"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": true,
+    "name": "IsFinalized"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "CustomerTransactionID"
+  ],
+  "row_count_baseline": 97147,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "CustomerTransactions",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.CustomerTransactions"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "CustomerName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "BillToCustomerID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerCategoryID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "BuyingGroupID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PrimaryContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "AlternateContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryMethodID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryCityID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PostalCityID"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "CreditLimit"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "AccountOpenedDate"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "StandardDiscountPercentage"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsStatementSent"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsOnCreditHold"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PaymentDays"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PhoneNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "FaxNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryRun"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "RunPosition"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "WebsiteURL"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryAddressLine2"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryPostalCode"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "DeliveryLocation"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "PostalAddressLine2"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalPostalCode"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "CustomerID"
+  ],
+  "row_count_baseline": 663,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "Customers",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.Customers"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "CustomerName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "BillToCustomerID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerCategoryID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "BuyingGroupID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PrimaryContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "AlternateContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryMethodID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryCityID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PostalCityID"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "CreditLimit"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "AccountOpenedDate"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "StandardDiscountPercentage"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsStatementSent"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsOnCreditHold"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PaymentDays"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PhoneNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "FaxNumber"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryRun"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "RunPosition"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "WebsiteURL"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryAddressLine2"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DeliveryPostalCode"
+   },
+   {
+    "data_type": "geography",
+    "is_nullable": true,
+    "name": "DeliveryLocation"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalAddressLine1"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "PostalAddressLine2"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PostalPostalCode"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 51,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "Customers_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.Customers_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "InvoiceLineID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "InvoiceID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "Description"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PackageTypeID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "Quantity"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "UnitPrice"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TaxRate"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TaxAmount"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "LineProfit"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "ExtendedPrice"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "InvoiceLineID"
+  ],
+  "row_count_baseline": 228265,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "InvoiceLines",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.InvoiceLines"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "InvoiceID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "BillToCustomerID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "OrderID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "DeliveryMethodID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "AccountsPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SalespersonPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PackedByPersonID"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "InvoiceDate"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "CustomerPurchaseOrderNumber"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsCreditNote"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "CreditNoteReason"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Comments"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryInstructions"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "InternalComments"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "TotalDryItems"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "TotalChillerItems"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryRun"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "RunPosition"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "ReturnedDeliveryData"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": true,
+    "name": "ConfirmedDeliveryTime"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "ConfirmedReceivedBy"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "InvoiceID"
+  ],
+  "row_count_baseline": 70510,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "Invoices",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.Invoices"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "OrderLineID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "OrderID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "Description"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PackageTypeID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "Quantity"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "UnitPrice"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TaxRate"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PickedQuantity"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": true,
+    "name": "PickingCompletedWhen"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "OrderLineID"
+  ],
+  "row_count_baseline": 231412,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "OrderLines",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.OrderLines"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "OrderID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "CustomerID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SalespersonPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "PickedByPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ContactPersonID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "BackorderOrderID"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "OrderDate"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "ExpectedDeliveryDate"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "CustomerPurchaseOrderNumber"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsUndersupplyBackordered"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Comments"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "DeliveryInstructions"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "InternalComments"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": true,
+    "name": "PickingCompletedWhen"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "OrderID"
+  ],
+  "row_count_baseline": 73595,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "Orders",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.Orders"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SpecialDealID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "StockItemID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "CustomerID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "BuyingGroupID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "CustomerCategoryID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "StockGroupID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "DealDescription"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "StartDate"
+   },
+   {
+    "data_type": "date",
+    "is_nullable": false,
+    "name": "EndDate"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "DiscountAmount"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "DiscountPercentage"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "UnitPrice"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "SpecialDealID"
+  ],
+  "row_count_baseline": 2,
+  "schema": "Sales",
+  "system": "sqlserver-wwi",
+  "table": "SpecialDeals",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Sales.SpecialDeals"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "bigint",
+    "is_nullable": false,
+    "name": "ColdRoomTemperatureID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ColdRoomSensorNumber"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "RecordedWhen"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "Temperature"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "ColdRoomTemperatureID"
+  ],
+  "row_count_baseline": 4,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "ColdRoomTemperatures",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.ColdRoomTemperatures"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "bigint",
+    "is_nullable": false,
+    "name": "ColdRoomTemperatureID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ColdRoomSensorNumber"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "RecordedWhen"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "Temperature"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 3654736,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "ColdRoomTemperatures_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.ColdRoomTemperatures_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ColorID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "ColorName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "ColorID"
+  ],
+  "row_count_baseline": 36,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "Colors",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.Colors"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ColorID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "ColorName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 1,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "Colors_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.Colors_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PackageTypeID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PackageTypeName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "PackageTypeID"
+  ],
+  "row_count_baseline": 14,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "PackageTypes",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.PackageTypes"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "PackageTypeID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "PackageTypeName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 0,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "PackageTypes_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.PackageTypes_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockGroupID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "StockGroupName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "StockGroupID"
+  ],
+  "row_count_baseline": 10,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "StockGroups",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.StockGroups"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockGroupID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "StockGroupName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 1,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "StockGroups_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.StockGroups_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "QuantityOnHand"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "BinLocation"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastStocktakeQuantity"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "LastCostPrice"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ReorderLevel"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "TargetStockLevel"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "StockItemID"
+  ],
+  "row_count_baseline": 227,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "StockItemHoldings",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.StockItemHoldings"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemStockGroupID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockGroupID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "StockItemStockGroupID"
+  ],
+  "row_count_baseline": 442,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "StockItemStockGroups",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.StockItemStockGroups"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemTransactionID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "TransactionTypeID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "CustomerID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "InvoiceID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "SupplierID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "PurchaseOrderID"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "TransactionOccurredWhen"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "Quantity"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "LastEditedWhen"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "StockItemTransactionID"
+  ],
+  "row_count_baseline": 236667,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "StockItemTransactions",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.StockItemTransactions"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "StockItemName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "ColorID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "UnitPackageID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "OuterPackageID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Brand"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Size"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LeadTimeDays"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "QuantityPerOuter"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsChillerStock"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Barcode"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TaxRate"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "UnitPrice"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "RecommendedRetailPrice"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TypicalWeightPerUnit"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "MarketingComments"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "InternalComments"
+   },
+   {
+    "data_type": "varbinary",
+    "is_nullable": true,
+    "name": "Photo"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "CustomFields"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Tags"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SearchDetails"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "StockItemID"
+  ],
+  "row_count_baseline": 227,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "StockItems",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.StockItems"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "StockItemID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "StockItemName"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "SupplierID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": true,
+    "name": "ColorID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "UnitPackageID"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "OuterPackageID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Brand"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Size"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LeadTimeDays"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "QuantityPerOuter"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsChillerStock"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Barcode"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TaxRate"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "UnitPrice"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": true,
+    "name": "RecommendedRetailPrice"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "TypicalWeightPerUnit"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "MarketingComments"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "InternalComments"
+   },
+   {
+    "data_type": "varbinary",
+    "is_nullable": true,
+    "name": "Photo"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "CustomFields"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "Tags"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "SearchDetails"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "LastEditedBy"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidFrom"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "ValidTo"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [],
+  "row_count_baseline": 444,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "StockItems_Archive",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.StockItems_Archive"
+ },
+ {
+  "classification": "UNCLASSIFIED",
+  "columns": [
+   {
+    "data_type": "bigint",
+    "is_nullable": false,
+    "name": "VehicleTemperatureID"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": false,
+    "name": "VehicleRegistration"
+   },
+   {
+    "data_type": "int",
+    "is_nullable": false,
+    "name": "ChillerSensorNumber"
+   },
+   {
+    "data_type": "datetime2",
+    "is_nullable": false,
+    "name": "RecordedWhen"
+   },
+   {
+    "data_type": "decimal",
+    "is_nullable": false,
+    "name": "Temperature"
+   },
+   {
+    "data_type": "nvarchar",
+    "is_nullable": true,
+    "name": "FullSensorData"
+   },
+   {
+    "data_type": "bit",
+    "is_nullable": false,
+    "name": "IsCompressed"
+   },
+   {
+    "data_type": "varbinary",
+    "is_nullable": true,
+    "name": "CompressedSensorData"
+   }
+  ],
+  "database": "WideWorldImporters",
+  "discovered_by": "discovery-agent",
+  "primary_key": [
+   "VehicleTemperatureID"
+  ],
+  "row_count_baseline": 65998,
+  "schema": "Warehouse",
+  "system": "sqlserver-wwi",
+  "table": "VehicleTemperatures",
+  "table_id": "sqlserver-wwi.WideWorldImporters.Warehouse.VehicleTemperatures"
+ }
+]

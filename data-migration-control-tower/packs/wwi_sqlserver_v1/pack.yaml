@@ -1,0 +1,77 @@
+# Migration Pack (Day 10 Phase 3, master doc §32). Pairs an estate.yaml
+# source with the classification rules / dialect notes / default
+# execution mode specific to this source family — formalizes what used
+# to be implicit, scattered WWI-specific assumptions (agents/planner/
+# agent.py's SCHEDULED_* constants, etc.) into one declared bundle.
+
+pack_id: wwi_sqlserver_v1
+version: "1.0.0"
+display_name: "WideWorldImporters (SQL Server) — v1"
+
+estate_file: simulator/source_setup/estate.yaml
+source_id: wwi-sqlserver
+
+classification_rules: policies/data_classification.yaml
+dialect_notes: null  # SQL Server source, no dialect translation needed
+
+# No Oracle-corpus SQL views to parse for this source's own lineage —
+# passing a path with no *.sql files keeps a WWI-only assessment from
+# picking up unrelated Oracle-corpus edges. See
+# agents/discovery/run_assessment.py.
+lineage_sql_corpus_path: null
+
+# assessment: Discovery -> Lineage -> Risk -> Planner, then stop (no
+#   target write) — the right mode for evaluating a NEW estate/source
+#   before ever touching production.
+# execution: the full migration lifecycle (this project's flagship demo
+#   path, agents/orchestrator/run_full_migration.py).
+default_mode: execution
+
+# The table this run actually migrates. Declared here rather than derived,
+# and that distinction is the point: these six values were module
+# constants (agents/planner/agent.py's SCHEDULED_*, agents/validation/
+# agent.py's SOURCE_*/KEY_COLUMN/NUMERIC_COLUMN/NULL_CHECK_COLUMN,
+# agents/orchestrator/orchestrator.py's KEY_COLUMN) compiled into the
+# fleet, which is what made the estate unswappable. Reproducing them
+# exactly here is what makes their removal provably behavior-preserving —
+# tests/test_plan_builder.py pins the resulting plan_hash against the
+# value computed before the refactor.
+#
+# A pack with no scheduled_tables (the normal case for a newly onboarded
+# estate) derives all of this from the discovered catalog instead; see
+# tools/plan_builder.py::build_targets.
+#
+# Note on null_check_column: PhoneNumber is NOT NULL in the real WWI
+# schema, so the null-profile check on it compares 0 against 0. That is
+# the behavior this project has always had, preserved deliberately rather
+# than quietly "fixed" during a portability refactor. Derivation would
+# pick a genuinely nullable column instead — which is the better check,
+# and the right thing to change on purpose, in its own change.
+scheduled_tables:
+  - source_schema: Sales
+    source_table: Customers
+    target_table: customers_dim
+    key_column: CustomerID
+    numeric_column: CreditLimit
+    null_check_column: PhoneNumber
+
+# SQL Server data-type behavior, previously the _SCALAR_SAFE_TYPES /
+# _STRINGIFY_VIA_METHOD_TYPES / _STILL_EXCLUDED_TYPES constants in
+# tools/migration_executor.py. Dialect knowledge belongs to the pack; the
+# code that applies it stays with the adapter, because the mechanism
+# (SQL Server's own .ToString()) is itself dialect-specific.
+type_rules:
+  # Convert cleanly to BigQuery-autodetected JSON as-is.
+  scalar_safe:
+    [int, bigint, smallint, tinyint, bit,
+     nvarchar, varchar, char, nchar,
+     decimal, numeric, float, real,
+     date, datetime, datetime2, uniqueidentifier]
+  # Carried via col.ToString() — a real value, not a dropped column.
+  # Excluding them used to make post-remediation schema checks fail
+  # permanently, since the target could never match the source's columns.
+  stringify_via_method: [geography, geometry, hierarchyid]
+  # No honest cheap conversion. A declared gap, not a hidden one.
+  excluded: [xml, varbinary, image]
+  # Eligible to be a target's numeric_column for the aggregate check.
+  numeric: [int, bigint, smallint, tinyint, decimal, numeric, float, real, money, smallmoney]

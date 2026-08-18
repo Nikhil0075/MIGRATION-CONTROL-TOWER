@@ -1,0 +1,26 @@
+# Second estate (master doc §32.11's clean-estate onboarding test).
+#
+# The whole point of this file: connecting a different estate is a
+# configuration change. Nothing under agents/ was edited to support it.
+#
+# Credentials are references, never values — POSTGRES_PASSWORD names an
+# environment variable, and password_secret_ref would name a Secret Manager
+# secret in a real deployment (tools/secret_resolver.py resolves either).
+
+estate_id: retail-postgres-estate
+display_name: "Retail demo estate (PostgreSQL)"
+
+sources:
+  - source_id: retail-postgres
+    adapter: postgres
+    config:
+      database: retaildb
+    connection_profile:
+      host_env: POSTGRES_HOST
+      port_env: POSTGRES_PORT
+      user_env: POSTGRES_USER
+      password_env: POSTGRES_PASSWORD
+
+target:
+  system: bigquery
+  dataset_env: BQ_DATASET

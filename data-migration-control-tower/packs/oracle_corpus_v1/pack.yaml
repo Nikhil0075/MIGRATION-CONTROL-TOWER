@@ -1,0 +1,28 @@
+# Migration Pack (Day 10 Phase 3, master doc §32). The second-estate
+# onboarding proof: a structurally distinct source family (different
+# dialect, no live database at all) plugged into the exact same
+# SourceAdapter interface and assessment flow as wwi_sqlserver_v1 — no
+# new infrastructure needed to prove the pattern is real.
+
+pack_id: oracle_corpus_v1
+version: "1.0.0"
+display_name: "Oracle-dialect script corpus — v1 (assessment-only)"
+
+estate_file: simulator/source_setup/estate.yaml
+source_id: oracle-corpus
+
+classification_rules: policies/data_classification.yaml
+dialect_notes: >
+  NVL/DECODE/CONNECT BY constructs throughout this corpus require
+  BigQuery-compatible SQL translation before any load — see
+  agents/risk/agent.py's DIALECT_INCOMPATIBILITY finding and
+  tools/plan_builder.py's sql_translation_notes field.
+
+# This pack's own corpus IS the lineage source (its CREATE OR REPLACE
+# VIEW statements) — unlike wwi_sqlserver_v1, this is not null.
+lineage_sql_corpus_path: simulator/source_setup/oracle_dialect_corpus
+
+# No live Oracle database exists for this corpus (master doc §18.3's
+# explicit "no live Oracle dependency" rule) — assessment is the only
+# mode this pack supports; run_assessment.py refuses "execution" for it.
+default_mode: assessment

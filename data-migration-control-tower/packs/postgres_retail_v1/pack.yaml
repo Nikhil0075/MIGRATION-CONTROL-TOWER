@@ -1,0 +1,50 @@
+# Migration Pack for the second-estate proof (master doc §32.4, §32.11).
+#
+# Everything Postgres-specific about migrating this estate lives here or in
+# tools/adapters/postgres_adapter.py. No agent module knows this pack
+# exists; the Planner reads whichever pack the run records.
+#
+# Note what is NOT declared: scheduled_tables. The WWI pack declares its
+# table explicitly because it must reproduce constants that predate estate
+# configuration. A newly onboarded estate has no such history, so its
+# targets are DERIVED from the discovered catalog — which is the path a
+# real customer takes, and the one worth proving.
+
+pack_id: postgres_retail_v1
+version: "1.0.0"
+display_name: "Retail (PostgreSQL) — v1"
+
+estate_file: config/estates/retail-postgres.yaml
+source_id: retail-postgres
+
+classification_rules: policies/data_classification.yaml
+
+# Standard-conforming SQL; nothing here needs translation before load.
+dialect_notes: null
+
+# No SQL corpus to parse for lineage — this estate's dependencies are real
+# foreign keys, not view definitions.
+lineage_sql_corpus_path: null
+
+# Assessment first. §32.5's adoption principle: production-write access
+# should never be a prerequisite for discovering an estate, and a source
+# onboarded through the console starts read-only until someone decides
+# otherwise.
+default_mode: assessment
+
+type_rules:
+  # Postgres information_schema data_type spellings, which differ from SQL
+  # Server's — the reason type rules belong to the pack rather than to
+  # shared executor code.
+  scalar_safe:
+    [smallint, integer, bigint, numeric, real, double precision,
+     boolean, character varying, character, text, uuid,
+     date, "timestamp without time zone", "timestamp with time zone"]
+  # No cheap honest conversion, so they are excluded and the gap is
+  # recorded on the execution manifest rather than hidden.
+  stringify_via_method: []
+  excluded: [bytea, json, jsonb, ARRAY, USER-DEFINED]
+  # Eligible to be a target's numeric_column for the aggregate check.
+  numeric: [smallint, integer, bigint, numeric, real, double precision]
+
+target_dataset: null

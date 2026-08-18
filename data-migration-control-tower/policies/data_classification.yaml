@@ -1,0 +1,44 @@
+# Deterministic data-classification rules (master doc §5.2, §7.1, §9).
+#
+# This is exactly the kind of decision the architecture rule in §9 assigns
+# to deterministic code, not a model: "PII classification rules that must
+# never be bypassed." tools/data_classifier.py applies these rules
+# mechanically against column names — no LLM judgment call, no room for a
+# prompt-injected description field to talk its way past a PII flag.
+#
+# Column-name matching is case-insensitive. First matching rule wins, in
+# list order; a table's overall classification is the most sensitive
+# classification found across any of its columns (PII > MASKED >
+# METADATA). A table with zero column matches classifies as METADATA —
+# never left at Discovery's placeholder 'UNCLASSIFIED'.
+
+rules:
+  - pattern: '(email)'
+    classification: PII
+    label: email address
+
+  - pattern: '(phone|mobile|fax)'
+    classification: PII
+    label: phone number
+
+  - pattern: '(national_?id|passport|ssn|social_?security|tax_?id)'
+    classification: PII
+    label: government identifier
+
+  - pattern: '(address|street|postal|zip_?code)'
+    classification: PII
+    label: physical address
+
+  - pattern: '(date_?of_?birth|dob|birth_?date)'
+    classification: PII
+    label: date of birth
+
+  - pattern: '(salary|compensation|bank_?account|credit_?card|iban)'
+    classification: PII
+    label: financial data
+
+  - pattern: '(first_?name|last_?name|full_?name|customer_?name|contact_?name)'
+    classification: MASKED
+    label: personal name (maskable, lower sensitivity than a direct identifier)
+
+default_classification: METADATA

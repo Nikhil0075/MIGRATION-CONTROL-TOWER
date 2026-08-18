@@ -1,0 +1,61 @@
+# Core
+python-dotenv==1.0.1
+pydantic==2.9.2
+jsonschema==4.23.0
+PyYAML>=6.0.2  # policies/*.yaml (agent permissions, data classification)
+
+# Legacy source connectivity
+# >=5.2 for prebuilt wheels on newer Python versions (5.1.0 forces a
+# source build lacking a local C compiler on some dev machines).
+pyodbc>=5.2.0
+sqlparse==0.5.1
+# Second source family (Day 11 Phase 7, §32.11's clean-estate onboarding
+# test). Imported lazily inside tools/adapters/postgres_adapter.py, so a
+# checkout that never touches a Postgres estate does not need the driver.
+psycopg[binary]>=3.2
+
+# GCP
+google-cloud-firestore==2.19.0
+google-cloud-pubsub==2.27.0
+google-cloud-bigquery==3.26.0
+# Per-estate credential resolution (Day 11 Phase 1, §32.2): estate source
+# connection profiles carry a secret REFERENCE, resolved at connect time by
+# tools/secret_resolver.py. Imported lazily there, so a checkout without this package
+# still runs — it falls back to the declared password_env and logs which path
+# answered rather than failing or silently pretending.
+google-cloud-secret-manager>=2.20.0
+
+# Agent framework — falls back to google-generativeai if google-adk is
+# unavailable in this environment (documented Rung-2 substitution, see
+# infrastructure/README.md and Day 1 notes).
+google-adk==0.1.0; python_version >= "3.10"
+google-generativeai==0.8.3
+Deprecated>=1.2.14  # transitive opentelemetry dependency not always pulled in automatically
+
+# Web service for Cloud Run
+fastapi==0.115.0
+uvicorn[standard]>=0.34.0  # floor set by google-adk's own dependency
+
+# Control Tower UI auth (Day 10 hardening, §5.2): server-side ID-token
+# verification for the human-approval endpoint. Uses the same Application
+# Default Credentials already configured for Firestore — no separate
+# service-account key file.
+firebase-admin>=6.5.0
+
+# Multimodal discovery (§22): documentation fixtures + Gemini vision/file input
+Pillow>=10.4.0
+reportlab>=4.2.5
+google-cloud-aiplatform>=1.60.0  # Vertex AI GenerativeModel, also pulled transitively by google-adk
+
+# Cloud Trace instrumentation (Day 10 hardening, Phase 5, master doc
+# Appendix E: "Traces carry run ID and agent identity and are viewable
+# in Cloud Trace."). All three were already pulled in transitively by
+# google-cloud-aiplatform/google-adk (confirmed via `pip show`) — pinned
+# explicitly here now that tools/tracing.py depends on them directly.
+opentelemetry-sdk==1.43.0
+opentelemetry-exporter-gcp-trace==1.14.0
+opentelemetry-resourcedetector-gcp==1.14.0
+
+# Testing
+pytest==8.3.3
+httpx>=0.27.0  # fastapi.testclient.TestClient

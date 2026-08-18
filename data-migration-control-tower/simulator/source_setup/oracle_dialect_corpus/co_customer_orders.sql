@@ -1,0 +1,55 @@
+-- source_system: oracle-corpus
+-- schema: CO (Customer Orders)
+-- Self-authored, modeled on Oracle's public Customer Orders sample schema shape.
+-- See oracle_dialect_corpus/README.md for attribution.
+
+CREATE TABLE CO.CUSTOMERS (
+    CUSTOMER_ID     NUMBER(10)     NOT NULL,
+    CUSTOMER_NAME   VARCHAR2(100)  NOT NULL,
+    EMAIL_ADDRESS   VARCHAR2(150),                 -- PII
+    NATIONAL_ID     VARCHAR2(30),                  -- PII: injected for the risk-detection scenario
+    ACCOUNT_MGR_ID  NUMBER(6),
+    CREATED_DATE    DATE           DEFAULT SYSDATE,
+    CONSTRAINT PK_CUSTOMERS PRIMARY KEY (CUSTOMER_ID)
+);
+
+CREATE TABLE CO.ORDERS (
+    ORDER_ID        NUMBER(10)     NOT NULL,
+    CUSTOMER_ID     NUMBER(10)     NOT NULL,
+    ORDER_DATE      DATE           NOT NULL,
+    ORDER_STATUS    VARCHAR2(20),
+    ORDER_METADATA  CLOB,                          -- JSON payload, Oracle 12c+ IS JSON constraint
+    CONSTRAINT PK_ORDERS PRIMARY KEY (ORDER_ID),
+    CONSTRAINT FK_ORDERS_CUSTOMER FOREIGN KEY (CUSTOMER_ID) REFERENCES CO.CUSTOMERS(CUSTOMER_ID),
+    CONSTRAINT CK_ORDER_METADATA_JSON CHECK (ORDER_METADATA IS JSON)
+);
+
+CREATE TABLE CO.ORDER_ITEMS (
+    ORDER_ITEM_ID   NUMBER(10)     NOT NULL,
+    ORDER_ID        NUMBER(10)     NOT NULL,
+    PRODUCT_CODE    VARCHAR2(20)   NOT NULL,
+    QUANTITY        NUMBER(6)      NOT NULL,
+    UNIT_PRICE      NUMBER(12,4)   NOT NULL,        -- high-precision NUMBER: BigQuery migration risk target
+    CONSTRAINT PK_ORDER_ITEMS PRIMARY KEY (ORDER_ITEM_ID),
+    CONSTRAINT FK_ITEMS_ORDER FOREIGN KEY (ORDER_ID) REFERENCES CO.ORDERS(ORDER_ID)
+);
+
+-- Oracle-dialect construct: NVL for null-coalescing, %TYPE anchor,
+-- JSON_VALUE extraction from the CLOB payload.
+DECLARE
+    v_status CO.ORDERS.ORDER_STATUS%TYPE;
+BEGIN
+    SELECT NVL(ORDER_STATUS, 'PENDING') INTO v_status
+    FROM CO.ORDERS
+    WHERE ORDER_ID = 1;
+END;
+/
+
+SELECT
+    o.ORDER_ID,
+    NVL(o.ORDER_STATUS, 'PENDING') AS ORDER_STATUS_RESOLVED,
+    JSON_VALUE(o.ORDER_METADATA, '$.channel') AS ORDER_CHANNEL,
+    c.EMAIL_ADDRESS,
+    c.NATIONAL_ID
+FROM CO.ORDERS o
+JOIN CO.CUSTOMERS c ON c.CUSTOMER_ID = o.CUSTOMER_ID;

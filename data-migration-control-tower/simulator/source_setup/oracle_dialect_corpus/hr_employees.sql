@@ -1,0 +1,60 @@
+-- source_system: oracle-corpus
+-- schema: HR
+-- Self-authored, modeled on Oracle's public HR sample schema shape.
+-- See oracle_dialect_corpus/README.md for attribution.
+
+CREATE TABLE HR.DEPARTMENTS (
+    DEPARTMENT_ID   NUMBER(4)      NOT NULL,
+    DEPARTMENT_NAME VARCHAR2(30)   NOT NULL,
+    MANAGER_ID      NUMBER(6),
+    LOCATION_ID     NUMBER(4),
+    CONSTRAINT PK_DEPARTMENTS PRIMARY KEY (DEPARTMENT_ID)
+);
+
+CREATE TABLE HR.JOBS (
+    JOB_ID      VARCHAR2(10)  NOT NULL,
+    JOB_TITLE   VARCHAR2(35)  NOT NULL,
+    MIN_SALARY  NUMBER(6),
+    MAX_SALARY  NUMBER(6),
+    CONSTRAINT PK_JOBS PRIMARY KEY (JOB_ID)
+);
+
+CREATE TABLE HR.EMPLOYEES (
+    EMPLOYEE_ID     NUMBER(6)      NOT NULL,
+    FIRST_NAME      VARCHAR2(20),
+    LAST_NAME       VARCHAR2(25)   NOT NULL,
+    EMAIL           VARCHAR2(100)  NOT NULL,      -- PII: personal email
+    PHONE_NUMBER    VARCHAR2(20),                  -- PII: personal phone
+    HIRE_DATE       DATE           NOT NULL,
+    JOB_ID          VARCHAR2(10)   NOT NULL,
+    SALARY          NUMBER(8,2),
+    MANAGER_ID      NUMBER(6),
+    DEPARTMENT_ID   NUMBER(4),
+    CONSTRAINT PK_EMPLOYEES PRIMARY KEY (EMPLOYEE_ID),
+    CONSTRAINT FK_EMP_JOB FOREIGN KEY (JOB_ID) REFERENCES HR.JOBS(JOB_ID),
+    CONSTRAINT FK_EMP_DEPT FOREIGN KEY (DEPARTMENT_ID) REFERENCES HR.DEPARTMENTS(DEPARTMENT_ID),
+    CONSTRAINT FK_EMP_MGR FOREIGN KEY (MANAGER_ID) REFERENCES HR.EMPLOYEES(EMPLOYEE_ID)
+);
+
+-- Oracle-dialect construct: DECODE for salary-grade classification.
+-- BigQuery equivalent: CASE WHEN ... END (Migration Planner translation target).
+SELECT
+    EMPLOYEE_ID,
+    LAST_NAME,
+    SALARY,
+    DECODE(SIGN(SALARY - 10000), 1, 'SENIOR', 0, 'SENIOR', -1, 'JUNIOR') AS SALARY_GRADE,
+    NVL(MANAGER_ID, -1) AS MANAGER_ID_RESOLVED
+FROM HR.EMPLOYEES;
+
+-- Oracle-dialect construct: hierarchical query for the reporting-chain.
+-- BigQuery has no native CONNECT BY; Planner must translate to a
+-- recursive WITH RECURSIVE CTE.
+SELECT
+    EMPLOYEE_ID,
+    LAST_NAME,
+    MANAGER_ID,
+    LEVEL AS ORG_DEPTH,
+    SYSDATE AS AS_OF
+FROM HR.EMPLOYEES
+START WITH MANAGER_ID IS NULL
+CONNECT BY PRIOR EMPLOYEE_ID = MANAGER_ID;

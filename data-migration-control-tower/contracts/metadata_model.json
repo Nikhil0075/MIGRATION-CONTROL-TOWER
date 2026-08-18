@@ -1,0 +1,460 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://data-migration-control-tower/contracts/metadata_model.json",
+  "title": "Migration Estate Metadata Model",
+  "description": "Normalized entities discovered from the legacy estate, per master doc §7.1. Discovery Agent (Day 2) emits Table and Pipeline records; Risk Agent (Day 3) emits RiskFinding and updates Table.classification; the deterministic policy engine (Day 3) emits PolicyDecision; Validation Agent (Day 3) emits ValidationResult; Dependency is populated by the Lineage Agent (later day).",
+  "definitions": {
+    "Table": {
+      "type": "object",
+      "description": "A Dataset/Table entity.",
+      "required": ["table_id", "system", "database", "schema", "table", "classification"],
+      "properties": {
+        "table_id": {
+          "type": "string",
+          "description": "Stable identifier, e.g. 'sqlserver-wwi.WideWorldImporters.Sales.Customers'."
+        },
+        "system": {
+          "type": "string",
+          "description": "Source system tag, e.g. 'sqlserver-wwi' or 'oracle-corpus'."
+        },
+        "database": { "type": "string" },
+        "schema": { "type": "string" },
+        "table": { "type": "string" },
+        "classification": {
+          "type": "string",
+          "description": "Discovery emits 'UNCLASSIFIED' by default — PII/sensitivity scoring is the Risk & Compliance Agent's responsibility (master doc §4, §9), not Discovery's.",
+          "enum": ["UNCLASSIFIED", "METADATA", "MASKED", "PII", "PRODUCTION"]
+        },
+        "row_count_baseline": { "type": ["integer", "null"], "minimum": 0 },
+        "primary_key": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "columns": {
+          "type": "array",
+          "description": "Optional extra detail beyond the §7.1 minimum fields.",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "data_type": { "type": "string" },
+              "is_nullable": {
+                "type": ["boolean", "null"],
+                "description": "Whether the source column accepts NULL. Null for adapters that parse static DDL and cannot determine it. Consumed by tools/plan_builder.py to pick a MigrationTarget's null_check_column deterministically instead of hardcoding one — without it there is no non-fabricated way to choose that column for a newly onboarded estate."
+              }
+            }
+          }
+        },
+        "discovered_at": { "type": "string", "format": "date-time" },
+        "discovered_by": { "type": "string" }
+      }
+    },
+    "Pipeline": {
+      "type": "object",
+      "required": ["pipeline_id", "source_system", "target_system", "schedule", "owner", "criticality", "code_path", "status"],
+      "properties": {
+        "pipeline_id": { "type": "string" },
+        "source_system": { "type": "string" },
+        "target_system": { "type": "string" },
+        "schedule": { "type": "string" },
+        "owner": { "type": "string" },
+        "criticality": {
+          "type": "string",
+          "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+        },
+        "code_path": { "type": "string" },
+        "status": { "type": "string" },
+        "upstream_tables": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Raw table references for the Lineage Agent to resolve into Dependency edges (not itself a Dependency record)."
+        },
+        "downstream_tables": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "discovered_at": { "type": "string", "format": "date-time" },
+        "discovered_by": { "type": "string" }
+      }
+    },
+    "Dependency": {
+      "type": "object",
+      "description": "Populated by the Lineage Agent (later build day); shape fixed now so downstream consumers can be written against it.",
+      "required": ["from_asset", "to_asset", "relationship", "discovered_by", "confidence"],
+      "properties": {
+        "from_asset": { "type": "string" },
+        "to_asset": { "type": "string" },
+        "relationship": { "type": "string", "enum": ["reads", "writes", "schedules"] },
+        "discovered_by": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "PolicyDecision": {
+      "type": "object",
+      "description": "Emitted by tools/policy_engine.py for every agent tool-call evaluation (master doc §5.1, §7.1 'Policy' entity). Deterministic — never produced by an LLM.",
+      "required": ["policy_id", "agent_id", "action", "resource_class", "decision"],
+      "properties": {
+        "policy_id": { "type": "string", "description": "e.g. 'POL-SOURCE.RAW_PII_READ-DISCOVERY'." },
+        "agent_id": { "type": "string", "description": "The 'subject' in §7.1's Policy entity." },
+        "action": { "type": "string" },
+        "resource_class": {
+          "type": "string",
+          "enum": ["METADATA", "MASKED", "PII", "PRODUCTION"]
+        },
+        "decision": { "type": "string", "enum": ["ALLOW", "DENY", "REQUIRE_APPROVAL"] },
+        "approval_required": { "type": "boolean" },
+        "run_id": { "type": ["string", "null"] },
+        "reason": { "type": "string" },
+        "decided_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "RiskFinding": {
+      "type": "object",
+      "description": "Emitted by the Risk & Compliance Agent (master doc §4).",
+      "required": ["finding_type", "table_id", "severity"],
+      "properties": {
+        "finding_type": {
+          "type": "string",
+          "enum": [
+            "PII_DETECTED", "DIALECT_INCOMPATIBILITY", "CRITICAL_DEPENDENCY",
+            "MISSING_IN_ACTUAL", "MISSING_IN_DOCUMENTED", "TYPE_DIVERGENCE",
+            "RELATIONSHIP_DIVERGENCE", "CLASSIFICATION_GAP",
+            "SENSITIVITY_SCREEN_DISAGREEMENT"
+          ],
+          "description": "The five MISSING_IN_ACTUAL..CLASSIFICATION_GAP types are documentation-drift findings (§22.2); SENSITIVITY_SCREEN_DISAGREEMENT is the Gemma-vs-careful-pass disagreement signal (§22.3)."
+        },
+        "table_id": { "type": "string" },
+        "severity": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "detail": { "type": "object" },
+        "discovered_by": { "type": "string" },
+        "discovered_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ValidationResult": {
+      "type": "object",
+      "description": "One deterministic reconciliation check (master doc §7.1, §7.3, §11.3). Produced by tools/reconciliation.py — never an LLM judgment call.",
+      "required": ["check_type", "status"],
+      "properties": {
+        "check_type": {
+          "type": "string",
+          "enum": ["schema", "row_count", "aggregate", "null_profile", "hash", "uniqueness"]
+        },
+        "source_value": {},
+        "target_value": {},
+        "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+        "tolerance": { "type": ["number", "null"] },
+        "evidence_hash": { "type": ["string", "null"] },
+        "detail": { "type": "object" }
+      }
+    },
+    "MigrationPlan": {
+      "type": "object",
+      "description": "Emitted by the Migration Planner Agent (master doc §4). One per run. Steps are inlined (not $ref'd to a separate MigrationPlanStep definition) so this schema validates standalone, the same way every other definition in this file is extracted and validated in isolation by its owning tool module.",
+      "required": ["run_id", "steps", "rollback_strategy", "plan_hash", "created_by", "created_at"],
+      "properties": {
+        "run_id": { "type": "string" },
+        "steps": {
+          "type": "array",
+          "description": "Each item: table_id, target_table, execution_order, scheduled (true for the table(s) this run actually migrates; false for catalog tables deferred to a future wave, per §12's 'follow one incident end-to-end' scope discipline), sql_translation_notes.",
+          "items": {
+            "type": "object",
+            "required": ["table_id", "target_table", "execution_order", "scheduled"],
+            "properties": {
+              "table_id": { "type": "string" },
+              "target_table": { "type": "string" },
+              "execution_order": { "type": "integer", "minimum": 0 },
+              "scheduled": { "type": "boolean" },
+              "sql_translation_notes": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "targets": {
+          "type": "array",
+          "description": "The executable half of the plan (§32's portability model). `steps` describes every catalogued table; `targets` carries the resolved column-level facts the executor, validation, recovery and cutover need — source/target table names, key column, aggregate and null-check columns. Before this existed those facts were module constants in agents/planner/agent.py, agents/orchestrator/orchestrator.py and agents/validation/agent.py, which is what made the estate unswappable. Each item conforms to this file's MigrationTarget definition, deliberately NOT $ref'd: every consumer here extracts one definition node and validates it standalone with no RefResolver (tools/source_catalog.py::_load_schema and its four siblings), so an internal $ref would fail to resolve. tools/plan_builder.py validates each target against MigrationTarget individually — same convention as `steps` being inlined.",
+          "items": { "type": "object" }
+        },
+        "estate_id": { "type": "string" },
+        "source_id": { "type": "string" },
+        "pack_id": { "type": "string" },
+        "rollback_strategy": { "type": "string" },
+        "plan_hash": {
+          "type": "string",
+          "description": "Binds an approval token to this exact plan (master doc §21.1) — a changed plan invalidates any outstanding approval."
+        },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MigrationTarget": {
+      "type": "object",
+      "description": "One table this run actually migrates, fully resolved. Every field is derived deterministically from the discovered catalog (Table.primary_key, Table.columns) plus the Migration Pack's declared type rules — never from a model, per CLAUDE.md's core rule, and never from a hardcoded constant, which is the point of the definition existing.",
+      "required": ["target_id", "table_id", "source_schema", "source_table", "target_table", "execution_order", "scheduled"],
+      "properties": {
+        "target_id": { "type": "string", "description": "Stable id within the plan, e.g. 'wwi-sqlserver:Sales.Customers'." },
+        "table_id": { "type": "string", "description": "Matches the catalog Table.table_id this target was derived from." },
+        "source_database": { "type": "string" },
+        "source_schema": { "type": "string" },
+        "source_table": { "type": "string" },
+        "target_table": { "type": "string", "description": "BigQuery table this loads into." },
+        "key_column": {
+          "type": ["string", "null"],
+          "description": "Single-column ordering/identity key from Table.primary_key. A composite primary key yields blocked=true rather than silently taking primary_key[0] — the executor's drop-fraction row ordering and reconciliation's hash check both assume one ordering key, so picking arbitrarily would be quietly wrong."
+        },
+        "order_by": { "type": ["string", "null"], "description": "Deterministic row ordering for extraction; normally equal to key_column." },
+        "numeric_column": {
+          "type": ["string", "null"],
+          "description": "Column for the aggregate-sum reconciliation check, chosen as the first non-key column whose data_type is in the pack's numeric type rules. Null when the table has none."
+        },
+        "null_check_column": {
+          "type": ["string", "null"],
+          "description": "Column for the null-profile check, chosen as the first nullable non-key column (requires Table.columns[].is_nullable). Null when the table has none."
+        },
+        "aggregate_check": {
+          "type": "string",
+          "enum": ["applicable", "not_applicable"],
+          "description": "'not_applicable' when numeric_column is null, i.e. the table has no column eligible for the aggregate-sum check under the pack's numeric type rules. The check is then omitted for this target and the reason recorded — reconciliation.check_aggregate only returns PASS/FAIL, so omitting with a stated reason is the only option that does not fabricate a passing check. The null-profile check's applicability is carried separately by null_check_column being null; the two checks fail independently and must not share one flag."
+        },
+        "execution_order": { "type": "integer", "minimum": 0 },
+        "scheduled": { "type": "boolean" },
+        "blocked": { "type": "boolean" },
+        "blocked_reason": { "type": ["string", "null"] },
+        "sql_translation_notes": { "type": ["string", "null"] }
+      }
+    },
+    "Incident": {
+      "type": "object",
+      "description": "The 'Incident/remediation' entity from master doc §7.1: signature, root_cause, fix, outcome, reusable_memory. Root-cause narrative may be Gemini-generated (§9's Gemini-eligible column); the fix that is actually applied is always a deterministic, pre-cataloged action, never a model's own proposal executed unchecked.",
+      "required": ["signature", "root_cause", "fix", "outcome"],
+      "properties": {
+        "signature": {
+          "type": "string",
+          "description": "Stable defect fingerprint, e.g. 'row_loss:Sales.Customers' — the key a future run's memory lookup would match on."
+        },
+        "root_cause": { "type": "string" },
+        "root_cause_generated_by": {
+          "type": "string",
+          "enum": ["gemini", "deterministic", "recalled_memory"],
+          "description": "'recalled_memory' means tools/memory_bank.py had a prior confirmed fact for this signature — cited as evidence, but deterministic re-validation still runs before the run is accepted (§21.2 proof 3)."
+        },
+        "fix": { "type": "string" },
+        "outcome": { "type": "string", "enum": ["PENDING", "RESOLVED", "UNRESOLVED"] },
+        "reusable_memory": { "type": "boolean" },
+        "run_id": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "AgentCard": {
+      "type": "object",
+      "description": "A versioned Agent Registry entry (master doc §20.1). Stored at agent_registry/{agent_id}/versions/{version}. The orchestrator's only route to an actor is querying capabilities against APPROVED cards (§20.4) — it never names an agent in code.",
+      "required": ["agent_id", "display_name", "version", "status", "owner", "capabilities", "permissions", "runtime", "published_by", "published_at"],
+      "properties": {
+        "agent_id": { "type": "string" },
+        "display_name": { "type": "string" },
+        "version": { "type": "string", "description": "Semver, e.g. '1.0.0'." },
+        "status": { "type": "string", "enum": ["DRAFT", "APPROVED", "RESTRICTED", "DEPRECATED"] },
+        "owner": {
+          "type": "object",
+          "required": ["team", "department"],
+          "properties": {
+            "team": { "type": "string" },
+            "department": { "type": "string" },
+            "contact": { "type": "string" }
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "URNs, e.g. 'discovery.catalog.estate'. discover() matches these against a query capability, including a 'prefix.*' wildcard form."
+        },
+        "handler": {
+          "type": "string",
+          "description": "dotted 'module.path:function_name' the orchestrator dynamically imports and calls — the mechanism that makes capability resolution real instead of a display list (§20's own framing: 'a registry demonstrates cataloging when the orchestrator cannot function without it')."
+        },
+        "input_contract": { "type": ["string", "null"] },
+        "output_contract": { "type": ["string", "null"] },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "service_account": { "type": ["string", "null"] }
+          }
+        },
+        "model": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "temperature": { "type": "number" }
+          }
+        },
+        "permissions": {
+          "type": "object",
+          "description": "Mirrors policies/agent_permissions.yaml's shape for this agent — the registry card is generated from that file today (single source of truth); a future day cuts tools/policy_engine.py over to reading this field directly, per §20.4.",
+          "properties": {
+            "allowed_tools": { "type": "array", "items": { "type": "string" } },
+            "denied_tools": { "type": "array", "items": { "type": "string" } },
+            "data_classes": { "type": "array", "items": { "type": "string" } },
+            "approval_required_actions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "sla": {
+          "type": "object",
+          "properties": {
+            "p95_latency_ms": { "type": "integer" },
+            "max_retries": { "type": "integer" },
+            "timeout_ms": { "type": "integer" }
+          }
+        },
+        "published_by": { "type": "string" },
+        "published_at": { "type": "string", "format": "date-time" },
+        "approved_by": { "type": ["string", "null"] },
+        "approved_at": { "type": ["string", "null"] },
+        "supersedes": { "type": ["string", "null"] },
+        "deprecated_at": { "type": ["string", "null"] }
+      }
+    },
+    "MemoryFact": {
+      "type": "object",
+      "description": "A cross-run remediation fact (master doc §5.3, §21.1). Stored globally at memory_bank/{signature} — NOT under a run, per §21.1's session-vs-memory rule: 'Memory is cross-run and holds only durable operational facts.' Recall never bypasses deterministic re-validation (§21.2 proof 3).",
+      "required": ["signature", "root_cause", "fix", "source_run_ids"],
+      "properties": {
+        "signature": { "type": "string", "description": "Normalized defect fingerprint, e.g. 'row_loss:Sales.Customers'." },
+        "root_cause": { "type": "string" },
+        "fix": { "type": "string" },
+        "source_run_ids": { "type": "array", "items": { "type": "string" } },
+        "recalled_by_run_ids": { "type": "array", "items": { "type": "string" } },
+        "reuse_count": { "type": "integer", "minimum": 0 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "last_confirmed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MigrationPack": {
+      "type": "object",
+      "description": "Day 10 Phase 3 (master doc §32's portability model). A versioned bundle pairing one estate.yaml source with the classification rules, dialect-translation notes, and default run mode specific to that source family — formalizes what used to be implicit, source-specific assumptions scattered across agent modules. Not itself persisted to Firestore; loaded from packs/{pack_id}/pack.yaml by agents/discovery/run_assessment.py and (for execution-mode packs) agents/orchestrator/orchestrator.py.",
+      "required": ["pack_id", "version", "estate_file", "source_id", "default_mode"],
+      "properties": {
+        "pack_id": { "type": "string" },
+        "version": { "type": "string", "description": "Semver-style pack version, e.g. '1.0.0'." },
+        "display_name": { "type": "string" },
+        "estate_file": { "type": "string", "description": "Path to the estate.yaml this pack's source_id is declared in." },
+        "source_id": { "type": "string", "description": "Which source in estate_file this pack targets." },
+        "classification_rules": { "type": "string", "description": "Path to a data-classification rules file, e.g. policies/data_classification.yaml." },
+        "dialect_notes": { "type": ["string", "null"] },
+        "lineage_sql_corpus_path": { "type": ["string", "null"] },
+        "default_mode": { "type": "string", "enum": ["assessment", "execution"] },
+        "type_rules": {
+          "type": "object",
+          "description": "Source-family data-type behavior, previously the _SCALAR_SAFE_TYPES / _STRINGIFY_VIA_METHOD_TYPES / _STILL_EXCLUDED_TYPES module constants in tools/migration_executor.py. The rules belong to the pack because they are dialect knowledge; the function that applies them stays on the adapter because the mechanism (SQL Server's .ToString()) is dialect-specific too.",
+          "properties": {
+            "scalar_safe": { "type": "array", "items": { "type": "string" } },
+            "stringify_via_method": { "type": "array", "items": { "type": "string" } },
+            "excluded": { "type": "array", "items": { "type": "string" } },
+            "numeric": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Data types eligible to be a MigrationTarget.numeric_column for the aggregate reconciliation check."
+            }
+          }
+        },
+        "scheduled_tables": {
+          "type": "array",
+          "description": "Tables this pack explicitly schedules for execution, with their resolved columns. An explicit entry always wins over catalog-derived inference — this is what lets the committed WWI pack reproduce the previous SCHEDULED_* constants byte-for-byte, making their removal provably behavior-preserving. Omit entirely for a newly onboarded estate and every field is derived from the discovered catalog instead.",
+          "items": {
+            "type": "object",
+            "required": ["source_schema", "source_table", "target_table"],
+            "properties": {
+              "source_schema": { "type": "string" },
+              "source_table": { "type": "string" },
+              "target_table": { "type": "string" },
+              "key_column": { "type": ["string", "null"] },
+              "numeric_column": { "type": ["string", "null"] },
+              "null_check_column": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "target_dataset": { "type": ["string", "null"], "description": "Overrides BQ_DATASET for this pack; null falls back to the environment default." }
+      }
+    },
+    "ConnectionProfile": {
+      "type": "object",
+      "description": "How to reach one source, by REFERENCE ONLY. This definition deliberately declares no field that could hold a credential value, and additionalProperties is false so one cannot be added by accident — tests/test_contracts.py asserts this directly. The onboarding wizard collects references; tools/secrets.py resolves them at connection time; nothing here is ever persisted to Firestore, returned by the API, or written to a log.",
+      "additionalProperties": false,
+      "properties": {
+        "host": { "type": ["string", "null"], "description": "Literal hostname. Non-secret." },
+        "host_env": { "type": ["string", "null"], "description": "Name of an environment variable holding the host." },
+        "port": { "type": ["integer", "null"] },
+        "port_env": { "type": ["string", "null"] },
+        "user": { "type": ["string", "null"] },
+        "user_env": { "type": ["string", "null"] },
+        "password_secret_ref": {
+          "type": ["string", "null"],
+          "description": "Secret Manager reference, e.g. 'sqlserver-wwi-password' or a full 'projects/{p}/secrets/{n}/versions/latest' path. Never the secret itself."
+        },
+        "password_env": {
+          "type": ["string", "null"],
+          "description": "Name of an environment variable to fall back to when password_secret_ref cannot be resolved (the documented local-dev path). A NAME, never a value."
+        }
+      }
+    },
+    "EstateSource": {
+      "type": "object",
+      "description": "One source system within an Estate. `adapter` names a type registered in tools/adapters/__init__.py's ADAPTER_TYPES; `config` is passed straight through as constructor kwargs, which is why its shape is adapter-defined rather than fixed here.",
+      "required": ["source_id", "adapter"],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "description": "Unique within the estate. Also the prefix of every table_id this source produces ('{source_id}.{database}.{schema}.{table}') and the Wave Manager concurrency key."
+        },
+        "adapter": { "type": "string", "description": "Registered adapter type, e.g. 'sqlserver', 'oracle_corpus', 'postgres'." },
+        "config": { "type": "object", "description": "Adapter constructor kwargs, e.g. {\"database\": \"WideWorldImporters\"}." },
+        "connection_profile": {
+          "type": ["object", "null"],
+          "description": "Conforms to this file's ConnectionProfile definition (not $ref'd — see MigrationPlan.targets for why). Null for static-file sources with no live connection."
+        },
+        "pack_id": { "type": ["string", "null"], "description": "Default Migration Pack for this source." }
+      }
+    },
+    "Estate": {
+      "type": "object",
+      "description": "A customer's legacy data estate — the unit of onboarding, isolation and authorization (§32.2). Stored at estates/{estate_id} in Firestore, importable from and exportable to estate.yaml so config-as-code and the in-app onboarding wizard describe the same thing. Multi-estate support is what turns this project from one migration into a migration control plane: run documents, Wave Manager concurrency state, connection health and role grants are all scoped by estate_id.",
+      "required": ["estate_id", "display_name", "sources"],
+      "properties": {
+        "estate_id": { "type": "string", "description": "Stable, unique. Used as the Firestore document id and as the scope key on runs, wave state, connection health and role claims." },
+        "display_name": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "DISABLED"], "description": "Deletion is soft: an estate referenced by non-terminal runs is DISABLED, never removed, so run history stays interpretable." },
+        "sources": {
+          "type": "array",
+          "description": "Each item conforms to this file's EstateSource definition (not $ref'd — see MigrationPlan.targets).",
+          "items": { "type": "object" },
+          "minItems": 1
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "system": { "type": "string", "enum": ["bigquery"] },
+            "project": { "type": ["string", "null"] },
+            "dataset": { "type": ["string", "null"] },
+            "dataset_env": { "type": ["string", "null"], "description": "Environment variable naming the dataset; falls back to BQ_DATASET." }
+          }
+        },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "team": { "type": "string" },
+            "contact": { "type": "string" }
+          }
+        },
+        "origin": {
+          "type": "string",
+          "enum": ["yaml_import", "wizard"],
+          "description": "Which authoring path created this document. import_from_yaml refuses to overwrite an estate whose origin is 'wizard' unless forced — that refusal is what lets committed config-as-code and in-app authoring coexist without one silently overwriting the other."
+        },
+        "schema_version": { "type": "integer", "minimum": 1 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "created_by": { "type": "string" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "updated_by": { "type": "string" }
+      }
+    }
+  }
+}
