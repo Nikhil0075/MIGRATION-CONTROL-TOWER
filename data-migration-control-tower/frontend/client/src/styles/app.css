@@ -291,3 +291,15 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
   .wizard-step.is-current .wizard-step-label { display: inline; }
   .wizard-summary { grid-template-columns: 1fr; }
 }
+
+/* Access levels on the sign-in and no-access screens (Day 11 Phase 9). */
+.access-levels { list-style: none; margin: 16px 0 4px; padding: 0; display: grid; gap: 9px; }
+.access-level { border: 1px solid var(--mct-border); border-left: 3px solid var(--mct-red); border-radius: 4px; padding: 10px 12px; background: var(--mct-surface-alt); }
+.access-level-name { display: inline-block; font-weight: 650; font-size: .82rem; }
+/* The scope is stated in words, not implied by the border colour alone. */
+.access-level-scope { display: inline-block; margin-left: 8px; color: var(--mct-muted); font-size: .72rem; }
+.access-level p { margin: 5px 0 0; color: var(--mct-muted); font-size: .75rem; line-height: 1.45; }
+.inline-alert { margin: 14px 0 0; padding: 9px 12px; border: 1px solid var(--mct-border); border-left-width: 3px; border-radius: 4px; background: var(--mct-surface-alt); font-size: .76rem; line-height: 1.45; }
+.inline-alert.warning { border-left-color: var(--mct-warning); }
+.inline-alert.danger { border-left-color: var(--mct-danger); }
+.inline-alert code { font-family: ui-monospace, monospace; font-size: .72rem; }

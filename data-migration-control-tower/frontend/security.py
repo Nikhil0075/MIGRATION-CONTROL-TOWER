@@ -1,8 +1,16 @@
 """Authentication and role-based authorization for the Control Tower UI.
 
-Firebase proves identity. Custom claims provide the roles used by the v1
-operator API. The legacy APPROVER_ALLOWLIST remains a deliberately small
-compatibility bridge for the existing approval flow.
+Firebase proves identity; roles are granted to the account, never chosen
+by the person signing in — otherwise anyone with a Google account could
+self-grant operator and onboard estates.
+
+Two ways an account gets a role:
+
+  1. Firebase custom claims (`estate_roles`) — per-estate, the production
+     path.
+  2. OPERATOR_ALLOWLIST / APPROVER_ALLOWLIST — a deliberately small
+     bootstrap for local development and first run. Global, unscoped, and
+     meant to be emptied once claims are populated.
 
 **Roles are scoped to an estate** (Day 11 Phase 5). A global `operator`
 role was defensible while the platform ran one estate; once a deployment
@@ -79,9 +87,32 @@ class UserContext:
         return sorted(e for e in (self.estate_roles or {}) if e != WILDCARD_ESTATE)
 
 
-def _load_approver_allowlist() -> list[str]:
-    raw = os.environ.get("APPROVER_ALLOWLIST", "")
+def _load_allowlist(variable: str) -> list[str]:
+    raw = os.environ.get(variable, "")
     return [entry.strip().lower() for entry in raw.split(",") if entry.strip()]
+
+
+def _load_approver_allowlist() -> list[str]:
+    return _load_allowlist("APPROVER_ALLOWLIST")
+
+
+def _load_operator_allowlist() -> list[str]:
+    """Emails granted `operator` without Firebase custom claims.
+
+    Without this there was no way to hold the operator role at all. A
+    normal Google sign-in carries no custom claims, so a real user got an
+    empty role set: every read returned 403 and "Onboard estate" was
+    permanently disabled. The only grant path was APPROVER_ALLOWLIST,
+    which grants `approver` — not `operator` — so nobody could onboard an
+    estate through the console at all.
+
+    Same deliberately small bootstrap shape as APPROVER_ALLOWLIST, and the
+    same limitation: it is a GLOBAL grant with no estate scope, intended
+    for local development and first-run bootstrap. Real deployments should
+    populate per-estate `estate_roles` custom claims and leave both
+    allowlists empty.
+    """
+    return _load_allowlist("OPERATOR_ALLOWLIST")
 
 
 def _is_allowlisted(email: str, allowlist: list[str]) -> bool:
@@ -175,6 +206,8 @@ def get_user_context(authorization: str | None = Header(default=None)) -> UserCo
     # estate_roles claims, then remove it.
     if _is_allowlisted(email, _load_approver_allowlist()):
         estate_roles.setdefault(WILDCARD_ESTATE, set()).update({"approver", "viewer"})
+    if _is_allowlisted(email, _load_operator_allowlist()):
+        estate_roles.setdefault(WILDCARD_ESTATE, set()).update({"operator", "viewer"})
 
     frozen = {estate_id: frozenset(roles) for estate_id, roles in estate_roles.items()}
     union = frozenset().union(*frozen.values()) if frozen else frozenset()

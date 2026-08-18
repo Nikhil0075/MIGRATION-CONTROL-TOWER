@@ -130,6 +130,16 @@ test("keyboard navigation and WCAG audit", async ({ page }) => {
   // a flaky accessibility test is worse than none, because it trains people
   // to re-run until green.
   await page.bringToFront();
+
+  // Wait for the app to finish hydrating BEFORE pressing anything. Tab can
+  // only move focus to an element that exists; pressing while the shell was
+  // still rendering left focus on <body> and :focus empty. That is why this
+  // passed on an idle machine and failed when the backend suite was running
+  // alongside it — the failure was load-sensitive, not random.
+  const skipLink = page.getByRole("link", { name: /Skip to operational workspace/i });
+  await expect(skipLink).toBeAttached();
+  await expect(page.locator(".spinner")).toHaveCount(0);
+
   await page.locator("body").press("Tab");
 
   const focused = page.locator(":focus");

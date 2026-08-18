@@ -384,3 +384,86 @@ def test_an_ambiguous_profile_must_be_chosen_not_guessed(client, monkeypatch):
     )
     assert response.status_code == 422
     assert "name the one to use" in response.json()["detail"]
+
+
+# --- Bootstrap grants (Day 11 Phase 9) -----------------------------------
+
+
+def _signed_in(monkeypatch, email="new.user@example.internal"):
+    from firebase_admin import auth
+
+    monkeypatch.setattr(firebase_admin, "_apps", {"test": object()})
+    monkeypatch.setattr(auth, "verify_id_token", lambda _t: {"uid": "u", "email": email})
+    return get_user_context("Bearer t")
+
+
+def test_a_fresh_google_account_holds_no_roles(monkeypatch):
+    """The reported symptom, pinned. A normal Google sign-in carries no
+    custom claims, so before OPERATOR_ALLOWLIST existed there was no way
+    to hold `operator` at all — every read 403'd and onboarding was
+    permanently disabled."""
+    monkeypatch.delenv("APPROVER_ALLOWLIST", raising=False)
+    monkeypatch.delenv("OPERATOR_ALLOWLIST", raising=False)
+    assert _signed_in(monkeypatch).roles == frozenset()
+
+
+def test_operator_allowlist_grants_onboarding(monkeypatch):
+    monkeypatch.delenv("APPROVER_ALLOWLIST", raising=False)
+    monkeypatch.setenv("OPERATOR_ALLOWLIST", "new.user@example.internal")
+    user = _signed_in(monkeypatch)
+    assert user.has_role("operator", "any-estate")
+    assert user.has_role("viewer", "any-estate"), "operator inherits read access"
+    assert not user.has_role("approver", "any-estate"), "onboarding is not approval"
+
+
+def test_operator_allowlist_matches_a_whole_domain(monkeypatch):
+    monkeypatch.delenv("APPROVER_ALLOWLIST", raising=False)
+    monkeypatch.setenv("OPERATOR_ALLOWLIST", "@example.internal")
+    assert _signed_in(monkeypatch).has_role("operator", "e")
+
+
+def test_the_two_allowlists_grant_different_things(monkeypatch):
+    """Operator onboards and runs; approver gives the human approval a
+    cutover cannot proceed without. Neither implies the other."""
+    monkeypatch.setenv("OPERATOR_ALLOWLIST", "op@example.internal")
+    monkeypatch.setenv("APPROVER_ALLOWLIST", "sme@example.internal")
+
+    operator = _signed_in(monkeypatch, "op@example.internal")
+    assert operator.has_role("operator", "e") and not operator.has_role("approver", "e")
+
+    sme = _signed_in(monkeypatch, "sme@example.internal")
+    assert sme.has_role("approver", "e") and not sme.has_role("operator", "e")
+
+
+def test_an_allowlisted_operator_can_actually_onboard(client, monkeypatch):
+    """End to end: the allowlist is what unblocks POST /api/v1/estates."""
+    from firebase_admin import auth
+
+    monkeypatch.delenv("APPROVER_ALLOWLIST", raising=False)
+    monkeypatch.setenv("OPERATOR_ALLOWLIST", "onboarder@example.internal")
+    monkeypatch.setattr(firebase_admin, "_apps", {"test": object()})
+    monkeypatch.setattr(
+        auth, "verify_id_token",
+        lambda _t: {"uid": "u", "email": "onboarder@example.internal"},
+    )
+    created = {}
+    # create_estate is imported inside the handler, so it is an attribute
+    # of tools.estate_registry rather than of frontend.api_v1.
+    monkeypatch.setattr(
+        "tools.estate_registry.create_estate",
+        lambda doc, actor: created.update(doc) or {**doc, "status": "ACTIVE", "origin": "wizard"},
+    )
+    monkeypatch.setattr("frontend.api_v1._record_estate_operation", lambda **_k: None)
+
+    response = client.post(
+        "/api/v1/estates",
+        headers=_headers(**{"Idempotency-Key": "allowlist-onboard-0001"}),
+        json={
+            "estate_id": "allowlist-estate",
+            "display_name": "Allowlist estate",
+            "sources": [{"source_id": "primary", "adapter": "postgres", "config": {}}],
+            "justification": "Operator granted via OPERATOR_ALLOWLIST",
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert created["estate_id"] == "allowlist-estate"

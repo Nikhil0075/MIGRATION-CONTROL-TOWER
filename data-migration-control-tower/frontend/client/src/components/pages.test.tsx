@@ -75,3 +75,37 @@ describe("evidence presentation", () => {
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(String(percent));
   });
 });
+
+describe("access levels on the sign-in screen", () => {
+  it("names both access levels and what each can do", async () => {
+    const { AuthenticationGate } = await import("./access-gates");
+    render(<AuthenticationGate configured={true} onSignIn={vi.fn()} />);
+
+    expect(screen.getByText("Operator")).toBeTruthy();
+    expect(screen.getByText("Onboards estates")).toBeTruthy();
+    expect(screen.getByText(/SME/)).toBeTruthy();
+    expect(screen.getByText("Acts on the rest")).toBeTruthy();
+  });
+
+  it("offers one sign-in, not a choice of privilege", async () => {
+    const { AuthenticationGate } = await import("./access-gates");
+    const { container } = render(
+      <AuthenticationGate configured={true} onSignIn={vi.fn()} />,
+    );
+    // Two "sign in as <role>" buttons would imply you can self-select
+    // privilege. Google proves identity; the role is granted to the account.
+    const buttons = Array.from(container.querySelectorAll("button"));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toMatch(/Sign in with Google/);
+  });
+
+  it("tells a role-less account how to get access instead of 403ing silently", async () => {
+    const { NoAccessGate } = await import("./access-gates");
+    render(<NoAccessGate email="new.user@example.test" onSignOut={vi.fn()} />);
+
+    expect(screen.getByText("No access yet")).toBeTruthy();
+    expect(screen.getByText("new.user@example.test")).toBeTruthy();
+    expect(screen.getByText(/OPERATOR_ALLOWLIST/)).toBeTruthy();
+    expect(screen.getByText(/APPROVER_ALLOWLIST/)).toBeTruthy();
+  });
+});

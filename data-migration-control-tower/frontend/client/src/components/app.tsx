@@ -10,6 +10,7 @@ import { publicApi, api } from "../api";
 import { initializeAuthentication, signIn, signOutUser } from "../auth";
 import { EstateSummary, NavItem, Role, RuntimeConfig, Session } from "../models";
 import { Icon } from "./icons";
+import { AuthenticationGate, NoAccessGate } from "./access-gates";
 import { PageRouter } from "./pages";
 import "../styles/app.css";
 
@@ -109,55 +110,6 @@ function useViewportWidth(): number {
     return () => window.removeEventListener("resize", update);
   }, []);
   return width;
-}
-
-function AuthenticationGate({
-  configured,
-  error,
-  onSignIn,
-}: {
-  configured: boolean;
-  error?: string | null;
-  onSignIn: () => void;
-}) {
-  return (
-    <main class="auth-page">
-      <section class="auth-card" aria-labelledby="auth-title">
-        <div class="brand-mark" aria-hidden="true">
-          M
-        </div>
-        <p class="eyebrow">Autonomous data migration</p>
-        <h1 id="auth-title">Migration Control Tower</h1>
-        <p>
-          Secure operational access to migration estates, evidence, approvals,
-          and system health.
-        </p>
-        {error && (
-          <div class="inline-alert danger" role="alert">
-            {error}
-          </div>
-        )}
-        {configured ? (
-          <button
-            class="button button-primary auth-action"
-            type="button"
-            onClick={onSignIn}
-          >
-            <Icon name="user" /> Sign in with Google
-          </button>
-        ) : (
-          <div class="inline-alert warning" role="status">
-            Firebase authentication is not configured. Set{" "}
-            <code>FIREBASE_WEB_CONFIG_JSON</code> on this service.
-          </div>
-        )}
-        <p class="auth-footnote">
-          Access is controlled by Firebase custom claims and audited for every
-          operator action.
-        </p>
-      </section>
-    </main>
-  );
 }
 
 function Navigation({
@@ -445,6 +397,18 @@ export const App = registerCustomElement("app-root", (_props: Props) => {
           setAuthError(null);
           void signIn().catch((reason) => setAuthError(reason.message || String(reason)));
         }}
+      />
+    );
+  }
+
+  // Authenticated but unauthorized. This is the normal first-run state for
+  // a fresh Google account, and it used to drop the user into a console
+  // where every request 403'd with no explanation of why.
+  if (!__MCT_E2E_BYPASS__ && (session.roles || []).length === 0) {
+    return (
+      <NoAccessGate
+        email={session.email}
+        onSignOut={() => void signOutUser()}
       />
     );
   }
