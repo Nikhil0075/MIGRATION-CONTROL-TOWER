@@ -11,7 +11,16 @@ the fastest way to make a submission look unfinished. Every prompt here
 carries `text, letters, numbers, captions` in its negative prompt, and the
 caption column below is for the edit, not for generation.
 
-Clips are in `docs/video/`.
+**The assembled loop is `docs/video/migration-control-tower-loop.mp4`** —
+30.2s, 1280x720, 6.4MB, with no audio track at all. Rebuild it after
+changing any clip with:
+
+```bash
+python tools/build_video_loop.py
+```
+
+The individual clips stay in `docs/video/` so a single shot can be
+regenerated and the loop rebuilt without redoing the set.
 
 ## Cut order
 
@@ -26,12 +35,14 @@ Clips are in `docs/video/`.
 
 ## Notes for the edit
 
-- **Mute every clip on import.** The brief called for a silent loop, and
-  these are NOT silent: Wan 2.7 attaches an AAC track, confirmed by finding
-  a `soun` handler and an `mp4a` sample entry in each file. It is model-
-  generated ambience nobody chose, so it must be muted rather than
-  inherited. If music is added, keep it under the captions rather than
-  cutting to it.
+- **The assembled loop has no audio track; the individual clips do.**
+  Wan 2.7 attaches an AAC track nobody asked for — confirmed by finding a
+  `soun` handler and an `mp4a` sample entry in each file rather than by
+  trusting the API's flag. `build_video_loop.py` drops it entirely with
+  `-an` rather than muting it, because a muted track still ships bytes and
+  un-mutes in any player that remembers volume. If you cut the clips by
+  hand instead, mute them on import. If music is added, keep it under the
+  captions rather than cutting to it.
 - **Restrained motion is deliberate.** Every prompt specifies a locked-off
   camera and slow pacing. This is an operations story; a showreel edit with
   fast whips would undercut the "trustworthy and inspectable" claim the
