@@ -2,7 +2,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
 import { h } from "preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import { EmptyState, LifecycleProgress, LoadingState, PageRouter, StatusPill } from "./pages";
+import { AGENT_IDENTITY } from "./agents";
+import { EmptyState, LOADING_FACTS, LifecycleProgress, LoadingState, PageRouter, StatusPill } from "./pages";
 import { formatValue, statusTone } from "../status";
 
 vi.mock("../api", () => ({
@@ -447,5 +448,41 @@ describe("loading states", () => {
   it("falls back to a generic message rather than an empty label", () => {
     render(<LoadingState />);
     expect(screen.getByText(/Loading operational data/)).toBeTruthy();
+  });
+});
+
+describe("the loading screen while waiting", () => {
+  it("states facts about the system, never invented progress", () => {
+    // The tempting thing here is fake activity — "scanning 58 tables…",
+    // a climbing percentage. Nothing knows how far along a request is, so
+    // all of it would be fabricated, and fabricated evidence is the exact
+    // thing this product claims not to produce.
+    for (const fact of LOADING_FACTS) {
+      expect(fact).not.toMatch(/\d+\s*%/);
+      expect(fact).not.toMatch(/scanning|analyz|processing \d/i);
+    }
+  });
+
+  it("keeps the rotating text away from screen readers", () => {
+    // The status message is what a reader needs. Text that swaps itself
+    // every four seconds inside a live region would interrupt them over
+    // and over.
+    const { container } = render(<LoadingState message="Building the dependency graph…" />);
+    expect(container.querySelector(".loading-fact")?.getAttribute("aria-hidden")).toBe("true");
+    expect(container.querySelector(".loading-fleet")?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByText("Building the dependency graph…")).toBeTruthy();
+  });
+
+  it("can be asked for the plain variant", () => {
+    const { container } = render(<LoadingState showFacts={false} />);
+    expect(container.querySelector(".loading-fact")).toBeNull();
+    expect(screen.getByText(/Loading operational data/)).toBeTruthy();
+  });
+
+  it("shows the whole fleet, not a hand-picked subset", () => {
+    const { container } = render(<LoadingState />);
+    expect(container.querySelectorAll(".loading-fleet img")).toHaveLength(
+      Object.keys(AGENT_IDENTITY).length,
+    );
   });
 });

@@ -632,3 +632,36 @@ test("an approval bound to a changed plan is flagged before cutover", async ({ p
   // And it states plainly that it cannot itself approve anything.
   await expect(page.getByText(/It cannot approve anything/)).toBeVisible();
 });
+
+
+test("the loading screen holds attention with facts, not invented progress", async ({ page }) => {
+  // Captured by holding the API open, because the state is otherwise too
+  // brief to inspect — which is also why it was never designed.
+  await installApiFixtures(page);
+  // AFTER the fixtures, deliberately: Playwright matches routes
+  // last-registered-first, so registering this before installApiFixtures
+  // lets its catch-all answer instantly and the page never shows a
+  // loading state at all.
+  await page.route("**/api/v1/incidents**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: { incidents: [], policy_denials: [], open_count: 0 }, meta: { generated_at: generatedAt, freshness: "live" } }),
+    });
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/incidents");
+
+  const fact = page.locator(".loading-fact");
+  await expect(fact).toBeVisible();
+  await expect(page.locator(".loading-fleet img")).toHaveCount(7);
+
+  // Whatever it says must be one of the vetted true statements — not a
+  // percentage and not fabricated activity.
+  const text = (await fact.textContent())?.trim() || "";
+  expect(text.length).toBeGreaterThan(20);
+  expect(text).not.toMatch(/\d+\s*%/);
+
+  await page.screenshot({ path: "test-results/loading-state.png" });
+});

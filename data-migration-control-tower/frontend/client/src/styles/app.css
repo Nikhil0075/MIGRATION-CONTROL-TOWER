@@ -429,3 +429,34 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 .empty-state-art { width: 96px; height: 96px; opacity: .85; margin-bottom: 2px; }
 .empty-state strong { color: var(--mct-ink); font-size: .82rem; }
 .empty-state p { margin: 0; max-width: 52ch; font-size: .73rem; line-height: 1.5; }
+
+/* Rich loading state (Day 11 Phase 15).
+   A wait is dead time; this fills it with things that are true rather
+   than with invented progress. */
+.page-state-rich { flex-direction: column; gap: 16px; min-height: 300px; padding: 32px 20px; text-align: center; }
+.loading-status { display: flex; align-items: center; gap: 10px; }
+
+.loading-fleet { display: flex; gap: 8px; align-items: center; justify-content: center; }
+.loading-fleet img { width: 34px; height: 34px; border-radius: 8px; opacity: .32; }
+
+.loading-fact {
+  margin: 0; max-width: 54ch; min-height: 2.6em;
+  color: var(--mct-muted); font-size: .78rem; line-height: 1.5;
+}
+
+/* Motion only where it is welcome. Without the guard the fleet pulses
+   forever and the fact line slides on every swap — on a screen someone is
+   already waiting in front of, that is the difference between calm and
+   agitating. */
+@keyframes loading-fleet-pulse {
+  0%, 70%, 100% { opacity: .32; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-3px); }
+}
+@keyframes loading-fact-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .loading-fleet img { animation: loading-fleet-pulse 2.6s ease-in-out infinite; }
+  .loading-fact { animation: loading-fact-in .5s ease-out; }
+}

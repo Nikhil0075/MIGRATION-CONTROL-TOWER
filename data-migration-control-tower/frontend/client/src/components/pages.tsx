@@ -6,7 +6,7 @@ import { api, idempotencyKey } from "../api";
 import { Column, EstateSummary, ProgressSnapshot, Role, Session } from "../models";
 import { formatValue, statusTone } from "../status";
 import { Icon } from "./icons";
-import { AgentBadge } from "./agents";
+import { AGENT_IDENTITY, AgentBadge, agentIdentity } from "./agents";
 import { OrchestrationMap } from "./orchestration";
 
 type RecordRow = Record<string, any>;
@@ -153,13 +153,94 @@ export function EmptyState({
   );
 }
 
-export function LoadingState({ message }: { message?: string }) {
-  // Says what is being waited for. "Loading…" tells an operator nothing;
-  // naming the work turns a wait into progress they can reason about.
+/** True statements about how this system works, shown while waiting.
+ *
+ * Deliberately facts, not telemetry. The tempting thing to put on a
+ * loading screen is activity — "scanning 58 tables…", a climbing
+ * percentage — and all of it would be invented, because nothing here
+ * knows how far along a request is. This product's whole claim is that it
+ * does not fabricate evidence, so a loading screen that fabricates
+ * progress would undercut the thing it is loading.
+ *
+ * Every line below is a property of the system that a reader could go and
+ * verify in the code.
+ */
+export const LOADING_FACTS = [
+  "Agents are resolved by capability from the registry — never imported directly.",
+  "Reconciliation compares row counts, aggregates and hashes in ordinary Python.",
+  "An approval token is bound to the plan hash it was issued against.",
+  "The policy engine takes no free-text estate content, so a table comment cannot reach a decision.",
+  "Credentials are stored as references. The console never holds a password.",
+  "A confirmed remediation is remembered, and cited by later runs as evidence.",
+  "A recalled fact never replaces the deterministic re-validation that follows it.",
+  "Every state transition is legal by construction, or it raises.",
+  "The Cutover Agent cannot approve its own work.",
+  "A message that defeats a consumer ten times is kept, not dropped.",
+];
+
+const FACT_INTERVAL_MS = 4200;
+
+export function LoadingState({
+  message,
+  showFacts = true,
+}: {
+  message?: string;
+  showFacts?: boolean;
+}) {
+  // Start somewhere random so a reader who moves between pages does not
+  // read the same opening line every time.
+  const [index, setIndex] = useState(() => Math.floor(Math.random() * LOADING_FACTS.length));
+
+  useEffect(() => {
+    if (!showFacts) return;
+    // Honour the same preference the rest of the app does. Text that
+    // swaps itself out is motion, and for some readers it is the kind
+    // that makes a page unusable.
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (reduced) return;
+    const timer = window.setInterval(
+      () => setIndex((current) => (current + 1) % LOADING_FACTS.length),
+      FACT_INTERVAL_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [showFacts]);
+
   return (
-    <div class="page-state">
-      <ProgressBar value={-1} aria-label={message || "Loading operational data"} />
-      <span>{message || "Loading operational data…"}</span>
+    <div class={`page-state ${showFacts ? "page-state-rich" : ""}`}>
+      {showFacts && (
+        // The fleet, lighting in sequence. Decorative: it represents the
+        // agents in the abstract, not any run's actual progress.
+        <div class="loading-fleet" aria-hidden="true">
+          {/* Every agent that has a face, in map order. Read here rather
+              than hoisted to a module constant purely so this module holds
+              no evaluation-order dependency on agents.tsx. */}
+          {Object.keys(AGENT_IDENTITY).map((agentId, position) => {
+            const identity = agentIdentity(agentId);
+            return identity ? (
+              <img
+                key={agentId}
+                src={identity.art}
+                alt=""
+                width="34"
+                height="34"
+                style={{ animationDelay: `${position * 0.16}s` }}
+              />
+            ) : null;
+          })}
+        </div>
+      )}
+      <div class="loading-status">
+        <ProgressBar value={-1} aria-label={message || "Loading operational data"} />
+        <span>{message || "Loading operational data…"}</span>
+      </div>
+      {showFacts && (
+        // aria-hidden on purpose. The status above is what a screen reader
+        // needs; text that rotates every few seconds under a live region
+        // would interrupt whatever the reader is doing, repeatedly.
+        <p class="loading-fact" aria-hidden="true" key={index}>
+          {LOADING_FACTS[index]}
+        </p>
+      )}
     </div>
   );
 }
