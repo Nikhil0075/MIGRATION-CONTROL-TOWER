@@ -16,6 +16,7 @@ const routes = [
   ["evaluations", "Evaluations"],
   ["incidents", "Incidents"],
   ["dead-letters", "Dead letters"],
+  ["memory", "Memory Bank"],
   ["system-health", "System Health"],
 ] as const;
 
@@ -100,6 +101,27 @@ const fixtureByPath: Record<string, unknown> = {
   "/api/v1/search": [{ id: "run-live", kind: "run", title: "run-live", subtitle: "COMPLETE", route: "/runs/run-live" }],
   "/api/v1/notifications": [{ id: "run-pending", kind: "approval", severity: "info", title: "Cutover approval required", status: "READY_FOR_APPROVAL", route: "/runs/run-pending" }],
   "/api/v1/estate-validations": { status: "NOT_APPLICABLE", detail: "Static source" },
+  "/api/v1/memory-bank": {
+    reused_facts: 1,
+    facts: [
+      {
+        signature: "row_loss:Sales.Customers",
+        root_cause: "The extract dropped 7 of 663 rows before load.",
+        fix: "Reloaded Sales.Customers from source and re-validated.",
+        recalled_by_count: 16, confirmations: 17,
+        recalled_by_run_ids: ["run-a"], source_run_ids: ["run-0"],
+        first_learned_at: generatedAt, last_confirmed_at: generatedAt,
+      },
+      {
+        signature: "schema_drift:Sales.Orders",
+        root_cause: "A column was added at source after planning.",
+        fix: "Re-derived the migration plan.",
+        recalled_by_count: 0, confirmations: 1,
+        recalled_by_run_ids: [], source_run_ids: ["run-1"],
+        first_learned_at: generatedAt, last_confirmed_at: generatedAt,
+      },
+    ],
+  },
   "/api/v1/incidents": {
     open_count: 1,
     incidents: [
@@ -543,4 +565,20 @@ test("the incident workspace shows the canonical root cause and the fix", async 
   await expect(page.getByText(/dropped 7 of 663 rows/)).toBeVisible();
   // The policy engine's refusals belong beside the failures they explain.
   await expect(page.getByText("read_raw_pii")).toBeVisible();
+});
+
+
+test("the Memory Bank distinguishes reuse from re-confirmation", async ({ page }) => {
+  // 16 later runs cited this fact; it was re-confirmed 17 times. Showing
+  // the larger number as "reused" would overstate what was proved.
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/memory");
+  await expect(page.getByRole("heading", { name: "Memory Bank", exact: true })).toBeVisible();
+
+  await expect(page.getByText("row_loss:Sales.Customers")).toBeVisible();
+  await expect(page.getByText("16", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("17", { exact: true }).first()).toBeVisible();
+  // The page states the limit of what it is, rather than implying semantic recall.
+  await expect(page.getByText(/not semantic similarity/)).toBeVisible();
 });

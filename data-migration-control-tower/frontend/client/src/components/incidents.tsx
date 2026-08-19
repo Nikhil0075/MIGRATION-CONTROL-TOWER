@@ -247,3 +247,87 @@ export function DeadLettersPage(props: PageProps) {
     </>
   );
 }
+
+export function MemoryBankPage(props: PageProps) {
+  const state = useResource<Row>("/api/v1/memory-bank");
+  const data = state.data as any;
+  const facts: Row[] = data?.facts || [];
+
+  return (
+    <>
+      <PageHeader
+        title="Memory Bank"
+        description="Confirmed remediations, kept across runs and cited as evidence by later ones."
+        generatedAt={state.generatedAt}
+      />
+      <PageState loading={state.loading} error={state.error} />
+      {data && (
+        <>
+          <div class="metric-grid">
+            <MetricCard
+              label="Facts learned"
+              value={facts.length}
+              detail="One per normalized incident signature"
+            />
+            <MetricCard
+              label="Facts reused"
+              value={data.reused_facts}
+              detail="Cited as evidence by a later run"
+            />
+          </div>
+
+          <Panel
+            title="Learned remediations"
+            subtitle="Exact-match recall on a normalized signature — not semantic similarity, which this project has no embedding infrastructure to do honestly."
+          >
+            {!facts.length ? (
+              <p class="empty-state">
+                Nothing learned yet. A fact is written only after an incident is
+                confirmed resolved, so this fills up as runs recover from real defects.
+              </p>
+            ) : (
+              <DataTable
+                label="Memory Bank facts"
+                rows={facts}
+                columns={[
+                  { key: "signature", label: "Signature" },
+                  { key: "root_cause", label: "Root cause" },
+                  { key: "fix", label: "Confirmed fix" },
+                  {
+                    key: "recalled_by_count",
+                    label: "Reused by runs",
+                  },
+                  { key: "confirmations", label: "Confirmations" },
+                  { key: "first_learned_at", label: "First learned" },
+                  { key: "last_confirmed_at", label: "Last confirmed" },
+                ]}
+                onRow={(row) => props.onInspect("Memory Bank fact", row)}
+              />
+            )}
+          </Panel>
+
+          <Panel title="What this is, and is not">
+            <ul class="plain-list">
+              <li>
+                <strong>Reused by runs</strong> counts later runs that cited a fact as
+                evidence. <strong>Confirmations</strong> counts how often it was
+                re-confirmed after a successful remediation. They are different numbers
+                and only the first demonstrates cross-run learning.
+              </li>
+              <li>
+                A recalled fact never replaces the deterministic re-validation that
+                follows it. Memory proposes; reconciliation decides.
+              </li>
+              <li>
+                This collection is cross-estate by design — a fact confirmed on one
+                estate is available to a later run on another. That is the point, and
+                also the reason a signature carries a source table name across an estate
+                boundary.
+              </li>
+            </ul>
+          </Panel>
+        </>
+      )}
+    </>
+  );
+}

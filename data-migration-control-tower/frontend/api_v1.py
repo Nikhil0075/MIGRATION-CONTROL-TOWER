@@ -2181,3 +2181,54 @@ def incidents(
         },
         total=len(records),
     )
+
+
+@router.get("/memory-bank", response_model=Envelope)
+def memory_bank_facts(user: UserContext = Depends(get_user_context)) -> dict:
+    """Durable remediation facts learned across runs.
+
+    Deliberately NOT estate-scoped, and not filterable by one: the whole
+    value of this collection is that a fact confirmed on one estate is
+    available to a later run on another. That is also its honest cost —
+    a signature carries a source table name, so this is the one place
+    where metadata legitimately crosses an estate boundary. Read access
+    is therefore the same coarse role as the rest of the console rather
+    than an estate grant, and the UI says so on the page.
+
+    `root_cause` here is already the canonical fact: recovery.py writes
+    `canonical_root_cause` into memory precisely so that re-confirming an
+    already-recalled fact does not nest another "Recalled from memory…"
+    wrapper on every generation. Nothing further needs unwrapping.
+    """
+    from tools import memory_bank
+
+    facts = []
+    for fact in memory_bank.list_facts():
+        recalled_by = fact.get("recalled_by_run_ids") or []
+        source_runs = fact.get("source_run_ids") or []
+        facts.append(
+            {
+                "signature": fact.get("signature"),
+                "root_cause": fact.get("root_cause"),
+                "fix": fact.get("fix"),
+                # Two different things, kept apart on purpose.
+                # `recalled_by` is the number of LATER runs that cited this
+                # fact as evidence — the only figure that demonstrates
+                # cross-run learning. `confirmations` counts how often the
+                # fact was re-confirmed after a successful remediation.
+                "recalled_by_count": len(recalled_by),
+                "recalled_by_run_ids": recalled_by,
+                "confirmations": fact.get("reuse_count", 0),
+                "source_run_ids": source_runs,
+                "first_learned_at": fact.get("created_at"),
+                "last_confirmed_at": fact.get("last_confirmed_at"),
+            }
+        )
+    facts.sort(key=lambda item: (item["recalled_by_count"], item.get("last_confirmed_at") or ""), reverse=True)
+    return _envelope(
+        {
+            "facts": facts,
+            "reused_facts": sum(1 for fact in facts if fact["recalled_by_count"]),
+        },
+        total=len(facts),
+    )

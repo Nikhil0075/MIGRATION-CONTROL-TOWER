@@ -2673,6 +2673,56 @@
         }
       }
     },
+    "/api/v1/memory-bank": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Memory Bank Facts",
+        "description": "Durable remediation facts learned across runs.\n\nDeliberately NOT estate-scoped, and not filterable by one: the whole\nvalue of this collection is that a fact confirmed on one estate is\navailable to a later run on another. That is also its honest cost \u2014\na signature carries a source table name, so this is the one place\nwhere metadata legitimately crosses an estate boundary. Read access\nis therefore the same coarse role as the rest of the console rather\nthan an estate grant, and the UI says so on the page.\n\n`root_cause` here is already the canonical fact: recovery.py writes\n`canonical_root_cause` into memory precisely so that re-confirming an\nalready-recalled fact does not nest another \"Recalled from memory\u2026\"\nwrapper on every generation. Nothing further needs unwrapping.",
+        "operationId": "memory_bank_facts_api_v1_memory_bank_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/legacy": {
       "get": {
         "summary": "Legacy Index",

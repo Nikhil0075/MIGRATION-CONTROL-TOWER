@@ -407,3 +407,6 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
    unrelated buttons. */
 .dead-letter-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+.plain-list { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: .76rem; color: var(--mct-muted); }
+.plain-list strong { color: var(--mct-ink); }

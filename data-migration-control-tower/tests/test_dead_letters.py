@@ -388,3 +388,77 @@ def test_the_replay_allowlist_comes_from_the_real_consumer_set():
     from tools.worker_supervisor import default_specs
 
     assert dlq.known_source_subscriptions() == {spec.subscription for spec in default_specs()}
+
+
+# ---------------------------------------------------------------------------
+# Memory Bank
+# ---------------------------------------------------------------------------
+
+
+def test_memory_bank_separates_reuse_from_reconfirmation(client, monkeypatch):
+    """Two numbers that are easy to conflate and mean different things.
+
+    `recalled_by_run_ids` is later runs that CITED the fact as evidence —
+    the only figure that demonstrates cross-run learning. `reuse_count` is
+    incremented every time the fact is re-confirmed after a successful
+    remediation, including by the run that first learned it. Reporting the
+    larger number as "reused" would overstate what the system proved.
+    """
+    from tools import memory_bank
+
+    _token(monkeypatch, {"estate_roles": {"*": ["viewer"]}})
+    monkeypatch.setattr(
+        memory_bank,
+        "list_facts",
+        lambda: [
+            {
+                "signature": "row_loss:Sales.Customers",
+                "root_cause": "The extract dropped rows before load.",
+                "fix": "Reloaded from source.",
+                "reuse_count": 17,
+                "recalled_by_run_ids": ["run-a", "run-b"],
+                "source_run_ids": ["run-0"],
+                "created_at": "2026-08-16T09:00:00Z",
+                "last_confirmed_at": "2026-08-18T06:00:00Z",
+            },
+            {
+                "signature": "schema_drift:Sales.Orders",
+                "root_cause": "A column was added at source.",
+                "fix": "Re-derived the plan.",
+                "reuse_count": 1,
+                "recalled_by_run_ids": [],
+                "source_run_ids": ["run-1"],
+                "created_at": "2026-08-17T09:00:00Z",
+                "last_confirmed_at": "2026-08-17T09:00:00Z",
+            },
+        ],
+    )
+
+    body = client.get("/api/v1/memory-bank", headers=HEADERS).json()["data"]
+
+    learned, unused = body["facts"]
+    assert learned["recalled_by_count"] == 2
+    assert learned["confirmations"] == 17
+    # Only the fact another run actually cited counts as reused.
+    assert body["reused_facts"] == 1
+    assert unused["recalled_by_count"] == 0
+
+
+def test_memory_bank_leads_with_the_most_reused_fact(client, monkeypatch):
+    from tools import memory_bank
+
+    _token(monkeypatch, {"estate_roles": {"*": ["viewer"]}})
+    monkeypatch.setattr(
+        memory_bank,
+        "list_facts",
+        lambda: [
+            {"signature": "rare", "recalled_by_run_ids": [], "reuse_count": 1},
+            {"signature": "common", "recalled_by_run_ids": ["a", "b", "c"], "reuse_count": 3},
+        ],
+    )
+    facts = client.get("/api/v1/memory-bank", headers=HEADERS).json()["data"]["facts"]
+    assert [f["signature"] for f in facts] == ["common", "rare"]
+
+
+def test_memory_bank_requires_authentication(client):
+    assert client.get("/api/v1/memory-bank").status_code in (401, 403)

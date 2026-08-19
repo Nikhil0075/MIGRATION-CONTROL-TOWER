@@ -105,6 +105,12 @@ const NAVIGATION: NavItem[] = [
     description: "Messages the fleet gave up on, with replay",
   },
   {
+    route: "memory",
+    label: "Memory Bank",
+    icon: "memory",
+    description: "Confirmed remediations reused across runs",
+  },
+  {
     route: "system-health",
     label: "System Health",
     icon: "health",
