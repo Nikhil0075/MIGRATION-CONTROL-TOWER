@@ -21,6 +21,7 @@ display_name: "WideWorldImporters demo estate"
 sources:
   - source_id: wwi-sqlserver
     adapter: sqlserver
+    pack_id: wwi_sqlserver_v1
     config:
       database: WideWorldImporters
     connection_profile:

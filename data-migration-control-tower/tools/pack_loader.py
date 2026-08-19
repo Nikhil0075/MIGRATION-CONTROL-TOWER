@@ -250,7 +250,64 @@ def build_adapter_for_pack(pack: dict) -> SourceAdapter:
     return build_adapter(source["adapter"], **(source.get("config") or {}))
 
 
-def build_adapter_for_estate(pack: dict, estate_id: str | None) -> SourceAdapter:
+def binding_for_estate_pack(pack: dict, estate_id: str | None, source_id: str | None = None):
+    """Resolve the *actual* estate source selected for a Migration Pack.
+
+    Pack fixture source IDs are examples, not identities that may be copied
+    onto a run for a separately registered estate.  A caller may name the
+    estate source explicitly; otherwise a source declaring this pack wins,
+    followed by the legacy fixture-id/adapter-family matching used by the
+    assessment CLI.
+    """
+    if not estate_id:
+        binding = binding_for_pack(pack)
+        if source_id and binding.source_id != source_id:
+            raise RuntimeError(
+                f"Pack {pack['pack_id']!r} is bound to source {binding.source_id!r}, "
+                f"not {source_id!r}."
+            )
+        return binding
+
+    from tools.connection_context import binding_from_estate, find_source, load_estate_document
+
+    wanted = find_source(estate_for_pack(pack), pack["source_id"])["adapter"]
+    estate = load_estate_document(estate_id)
+    sources = estate.get("sources") or []
+
+    if source_id:
+        candidates = [s for s in sources if s.get("source_id") == source_id]
+        if not candidates:
+            raise RuntimeError(f"Estate {estate_id!r} has no source {source_id!r}.")
+    else:
+        declared = [s for s in sources if s.get("pack_id") == pack["pack_id"]]
+        by_id = [s for s in sources if s.get("source_id") == pack["source_id"]]
+        candidates = declared or by_id or [s for s in sources if s.get("adapter") == wanted]
+
+    if not candidates:
+        raise RuntimeError(
+            f"Estate {estate_id!r} has no {wanted!r} source, so pack "
+            f"{pack['pack_id']!r} cannot be used against it. Its sources are: "
+            f"{[s.get('source_id') for s in sources] or 'none'}."
+        )
+    if len(candidates) > 1:
+        raise RuntimeError(
+            f"Estate {estate_id!r} has several possible sources for pack "
+            f"{pack['pack_id']!r} ({[s.get('source_id') for s in candidates]}); "
+            "the pack does not say which one to use; select source_id explicitly."
+        )
+
+    selected = candidates[0]
+    if selected.get("adapter") != wanted:
+        raise RuntimeError(
+            f"Source {selected['source_id']!r} uses adapter {selected.get('adapter')!r}, "
+            f"but pack {pack['pack_id']!r} requires {wanted!r}."
+        )
+    return binding_from_estate(estate, selected["source_id"])
+
+
+def build_adapter_for_estate(
+    pack: dict, estate_id: str | None, source_id: str | None = None
+) -> SourceAdapter:
     """Binds the adapter to the estate being assessed, not to the pack's own.
 
     `build_adapter_for_pack` resolves the source from the pack's OWN estate
@@ -269,31 +326,9 @@ def build_adapter_for_estate(pack: dict, estate_id: str | None) -> SourceAdapter
     every real onboarding, so the id is preferred and the adapter family is
     the fallback.
     """
-    if not estate_id:
+    if not estate_id and source_id is None:
         return build_adapter_for_pack(pack)
 
     from tools.adapters import build_adapter_for_binding
-    from tools.connection_context import binding_from_estate, find_source, load_estate_document
 
-    wanted = find_source(estate_for_pack(pack), pack["source_id"])["adapter"]
-    estate = load_estate_document(estate_id)
-    sources = estate.get("sources") or []
-
-    by_id = [s for s in sources if s.get("source_id") == pack["source_id"]]
-    candidates = by_id or [s for s in sources if s.get("adapter") == wanted]
-
-    if not candidates:
-        raise RuntimeError(
-            f"Estate {estate_id!r} has no {wanted!r} source, so pack "
-            f"{pack['pack_id']!r} cannot be assessed against it. Its sources are: "
-            f"{[s.get('source_id') for s in sources] or 'none'}."
-        )
-    if len(candidates) > 1:
-        # Guessing here would assess one source and label the result with
-        # the estate, which reads as coverage that was never measured.
-        raise RuntimeError(
-            f"Estate {estate_id!r} has {len(candidates)} {wanted!r} sources "
-            f"({[s.get('source_id') for s in candidates]}); the pack does not say "
-            f"which to assess. Name one of them {pack['source_id']!r}, or split the estate."
-        )
-    return build_adapter_for_binding(binding_from_estate(estate, candidates[0]["source_id"]))
+    return build_adapter_for_binding(binding_for_estate_pack(pack, estate_id, source_id))

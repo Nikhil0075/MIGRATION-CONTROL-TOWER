@@ -57,7 +57,7 @@ TOPICS=(
 )
 SUBSCRIPTIONS=(
   "migration-requested-sub" "discovery-completed-sub" "risk-assessed-sub"
-  "plan-created-sub" "validation-requested-sub" "validation-passed-sub" "validation-failed-sub"
+  "plan-created-sub" "validation-requested-sub" "validation-passed-sub" "approval-preparation-sub" "validation-failed-sub"
   "assessment-requested-sub"
   "cutover-approved-sub"
 )

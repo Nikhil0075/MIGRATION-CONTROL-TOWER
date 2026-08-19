@@ -22,8 +22,8 @@ def get_client() -> bigquery.Client:
     return bigquery.Client(project=project_id) if project_id else bigquery.Client()
 
 
-def _dataset() -> str:
-    return os.environ.get("BQ_DATASET", "migration_target")
+def _dataset(dataset: str | None = None) -> str:
+    return dataset or os.environ.get("BQ_DATASET", "migration_target")
 
 
 def load_json_rows(
@@ -74,9 +74,9 @@ def get_table_schema(table: str) -> list[bigquery.SchemaField]:
     return client.get_table(table_ref).schema
 
 
-def get_row_count(table: str) -> int:
+def get_row_count(table: str, *, dataset: str | None = None) -> int:
     client = get_client()
-    query = f"SELECT COUNT(*) AS n FROM `{client.project}.{_dataset()}.{table}`"
+    query = f"SELECT COUNT(*) AS n FROM `{client.project}.{_dataset(dataset)}.{table}`"
     return int(next(iter(client.query(query).result()))["n"])
 
 
@@ -102,11 +102,11 @@ def get_numeric_sum(table: str, column: str) -> float:
     return float(value) if value is not None else 0.0
 
 
-def get_key_values(table: str, column: str) -> list[str]:
+def get_key_values(table: str, column: str, *, dataset: str | None = None) -> list[str]:
     """Returns every value of `column` as a string, for a keyed hash check."""
     client = get_client()
     query = (
         f"SELECT CAST(`{column}` AS STRING) AS k "
-        f"FROM `{client.project}.{_dataset()}.{table}` ORDER BY k"
+        f"FROM `{client.project}.{_dataset(dataset)}.{table}` ORDER BY k"
     )
     return [row["k"] for row in client.query(query).result()]

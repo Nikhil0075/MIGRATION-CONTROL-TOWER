@@ -32,7 +32,49 @@ AGENT_ID = "discovery-agent"
 AGENT_VERSION = "0.1.0"
 
 
-def discover_estate(oracle_corpus_path: str, dag_artifacts_path: str) -> tuple[list[dict], list[dict]]:
+def _discover_registered_estate(estate_id: str) -> tuple[list[dict], list[dict]]:
+    """Discover every source declared by one registered estate."""
+    from tools.adapters import build_adapter_for_binding
+    from tools.connection_context import binding_from_estate, load_estate_document
+
+    estate = load_estate_document(estate_id)
+    tables: list[dict] = []
+    pipelines: list[dict] = []
+    for source in estate.get("sources") or []:
+        binding = binding_from_estate(estate, source["source_id"])
+        adapter = build_adapter_for_binding(binding)
+        try:
+            source_tables = adapter.discover_tables()
+            source_pipelines = adapter.discover_pipelines()
+            tables.extend(source_tables)
+            pipelines.extend(source_pipelines)
+            adapter.record_connection_health(
+                "HEALTHY" if binding.requires_connection else "OBSERVED",
+                detail="Estate-scoped metadata discovery succeeded",
+                object_count=len(source_tables) + len(source_pipelines),
+            )
+            logger.info(
+                "%s[%s].discover: %d tables, %d pipelines",
+                type(adapter).__name__,
+                binding.source_id,
+                len(source_tables),
+                len(source_pipelines),
+            )
+        except Exception as exc:
+            adapter.record_connection_health(
+                "FAILED",
+                detail=f"Estate-scoped metadata discovery failed: {type(exc).__name__}",
+            )
+            raise
+    return tables, pipelines
+
+
+def discover_estate(
+    oracle_corpus_path: str | None = None,
+    dag_artifacts_path: str | None = None,
+    *,
+    estate_id: str | None = None,
+) -> tuple[list[dict], list[dict]]:
     """Runs discovery across all three sources and returns
     (table_records, pipeline_records) — via tools/adapters/'s
     SourceAdapter classes rather than calling tools/source_catalog.py's
@@ -57,6 +99,15 @@ def discover_estate(oracle_corpus_path: str, dag_artifacts_path: str) -> tuple[l
     keeping the agent's own responsibility limited to "inventory legacy
     assets".
     """
+    if estate_id:
+        return _discover_registered_estate(estate_id)
+
+    if oracle_corpus_path is None or dag_artifacts_path is None:
+        raise ValueError(
+            "Legacy discovery requires oracle_corpus_path and dag_artifacts_path; "
+            "registered discovery requires estate_id."
+        )
+
     sql_adapter = SqlServerAdapter()
     try:
         sql_server_tables = sql_adapter.discover_tables()

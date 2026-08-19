@@ -308,6 +308,8 @@ def test_validation_passed_is_never_consumed():
     """advance_through_validation consumes validation-passed-sub as an
     assertion. Stealing it breaks make run / make harness / evaluation."""
     assert "validation-passed-sub" not in {spec.subscription for spec in ws.default_specs()}
+    approval = next(spec for spec in ws.default_specs() if spec.name == "approval")
+    assert approval.subscription == "approval-preparation-sub"
 
 
 def test_every_orchestrator_handler_has_a_consumer():
@@ -320,6 +322,7 @@ def test_every_orchestrator_handler_has_a_consumer():
         orch.RISK_ASSESSED_SUB,
         orch.PLAN_CREATED_SUB,
         orch.VALIDATION_REQUESTED_SUB,
+        orch.APPROVAL_PREPARATION_SUB,
         orch.VALIDATION_FAILED_SUB,
     ):
         assert sub in subscriptions

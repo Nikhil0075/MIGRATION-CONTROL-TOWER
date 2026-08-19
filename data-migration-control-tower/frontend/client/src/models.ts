@@ -37,6 +37,11 @@ export interface EstateSummary {
   status: string;
   sources: Array<Record<string, unknown>>;
   pipeline_options?: Array<{ pipeline_id: string; name: string }>;
+  execution_readiness?: {
+    status: "ready" | "blocked" | "selection_required";
+    options: Array<{ source_id: string; pack_id: string; label: string }>;
+    blockers: Array<{ code: string; message: string }>;
+  };
 }
 
 export interface ProgressSnapshot {

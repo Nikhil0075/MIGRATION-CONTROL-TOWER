@@ -31,3 +31,9 @@ node_modules/
 # Local tooling state
 *.log
 *.bak
+
+# Scratch and generated deliverables. `tmp/pdfs/rendered/` alone is 2.3MB of
+# re-generatable page renders; `output/` holds built PDFs. Both are outputs,
+# not sources, and neither belongs in history.
+output/
+tmp/

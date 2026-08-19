@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import threading
 
 import firebase_admin
 import pytest
@@ -44,6 +45,66 @@ def test_runtime_config_is_public_and_versioned(client: TestClient) -> None:
     body = response.json()
     assert body["data"]["product_name"] == "Migration Control Tower"
     assert body["meta"]["freshness"] == "live"
+
+
+def test_a_slow_read_cannot_repopulate_cache_after_a_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frontend import api_v1
+
+    monkeypatch.setattr(api_v1, "_CACHE_TTL_SECONDS", 60)
+    api_v1.clear_response_cache()
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_old_read():
+        started.set()
+        release.wait(timeout=2)
+        return {"data": ["pre-write"], "meta": {"freshness": "live"}}
+
+    thread = threading.Thread(target=lambda: api_v1._cached("estates", slow_old_read))
+    thread.start()
+    assert started.wait(timeout=2)
+    api_v1.clear_response_cache()
+    release.set()
+    thread.join(timeout=2)
+
+    assert "estates" not in api_v1._response_cache
+    current = api_v1._cached(
+        "estates", lambda: {"data": ["post-write"], "meta": {"freshness": "live"}}
+    )
+    assert current["data"] == ["post-write"]
+
+
+def test_creating_an_estate_invalidates_the_estate_list_cache(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frontend import api_v1
+
+    _claims(monkeypatch, "operator")
+    api_v1.clear_response_cache()
+    api_v1._response_cache["estates:None:*"] = (
+        float("inf"),
+        {"data": [{"estate_id": "old"}], "meta": {"freshness": "live"}},
+    )
+    monkeypatch.setattr(
+        "tools.estate_registry.create_estate",
+        lambda document, **_kwargs: {**document, "status": "ACTIVE"},
+    )
+    monkeypatch.setattr(api_v1, "_record_estate_operation", lambda **_kwargs: None)
+    monkeypatch.setattr(api_v1, "_sanitized_estate", lambda estate, _run: estate)
+
+    response = client.post(
+        "/api/v1/estates",
+        headers=_headers(**{"Idempotency-Key": "estate-cache-regression"}),
+        json={
+            "estate_id": "new-estate",
+            "display_name": "New estate",
+            "sources": [{"source_id": "new-sql", "adapter": "sqlserver"}],
+            "justification": "Verify immediate estate visibility",
+        },
+    )
+
+    assert response.status_code == 201
+    assert api_v1._response_cache == {}
 
 
 def test_v1_data_requires_authentication(client: TestClient) -> None:
@@ -91,6 +152,135 @@ def test_validation_failure_holds_at_validation_milestone(monkeypatch: pytest.Mo
     progress = _run_progress({"run_id": "run_failed", "state": "FAILED"})
     assert progress["percent"] == 50
     assert progress["status"] == "failed"
+
+
+def test_migrating_progress_counts_plan_targets_and_completed_manifests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frontend.api_v1 import _run_progress
+
+    def docs(_run_id, name, *_args):
+        if name == "migration_plan":
+            return [{"targets": [
+                {"target_id": "one", "scheduled": True, "blocked": False},
+                {"target_id": "two", "scheduled": True, "blocked": False},
+            ]}]
+        return [{"target_id": "one", "status": "COMPLETED"}]
+
+    monkeypatch.setattr("frontend.api_v1._collection_docs", docs)
+    progress = _run_progress({"run_id": "run_migrating", "state": "MIGRATING"})
+    # MIGRATING is 5/12 milestones, plus half of the next measured segment.
+    assert progress["percent"] == 46
+
+
+def _execution_fixture(monkeypatch: pytest.MonkeyPatch, *, sources=None, executable=True):
+    sources = sources or [{
+        "source_id": "primary-sql",
+        "adapter": "sqlserver",
+        "pack_id": "wwi_sqlserver_v1",
+    }]
+    monkeypatch.setattr(
+        "frontend.api_v1._estate",
+        lambda estate_id=None: {"estate_id": estate_id or "estate-one", "sources": sources},
+    )
+    monkeypatch.setattr(
+        "frontend.api_v1._packs",
+        lambda: [{
+            "pack_id": "wwi_sqlserver_v1",
+            "name": "WWI",
+            "source_id": "wwi-sqlserver",
+            "estate_file": "simulator/source_setup/estate.yaml",
+            "execution_supported": executable,
+        }],
+    )
+    monkeypatch.setattr("tools.pack_loader.adapter_type_for", lambda _pack: "sqlserver")
+
+
+def test_pack_driven_start_needs_no_discovered_pipeline(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _claims(monkeypatch, "operator")
+    _execution_fixture(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(
+        "frontend.api_v1.queue_operation",
+        lambda **kwargs: captured.update(kwargs) or {"operation_id": "op_pack", "status": "published"},
+    )
+    response = client.post(
+        "/api/v1/runs",
+        headers=_headers(**{"Idempotency-Key": "pack-driven-start-001"}),
+        json={
+            "estate_id": "estate-one",
+            "source_id": "primary-sql",
+            "pack_id": "wwi_sqlserver_v1",
+            "justification": "Execute the selected migration pack",
+        },
+    )
+    assert response.status_code == 202
+    assert captured["event"] == {
+        "pipeline_id": "wwi_sqlserver_v1",
+        "source_id": "primary-sql",
+        "pack_id": "wwi_sqlserver_v1",
+        "estate_id": "estate-one",
+        "drop_fraction": 0.0,
+    }
+
+
+def test_pack_and_legacy_alias_conflict_is_rejected(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _claims(monkeypatch, "operator")
+    response = client.post(
+        "/api/v1/runs",
+        headers=_headers(**{"Idempotency-Key": "pack-alias-conflict-001"}),
+        json={
+            "pack_id": "wwi_sqlserver_v1",
+            "execution_profile": "another_pack",
+            "justification": "Reject conflicting compatibility fields",
+        },
+    )
+    assert response.status_code == 422
+    assert "must match" in response.json()["detail"]
+
+
+def test_source_is_resolved_only_when_pack_binding_is_unique(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _claims(monkeypatch, "operator")
+    _execution_fixture(monkeypatch, sources=[
+        {"source_id": "one", "adapter": "sqlserver", "pack_id": "wwi_sqlserver_v1"},
+        {"source_id": "two", "adapter": "sqlserver", "pack_id": "wwi_sqlserver_v1"},
+    ])
+    response = client.post(
+        "/api/v1/runs",
+        headers=_headers(**{"Idempotency-Key": "pack-ambiguous-source-001"}),
+        json={
+            "estate_id": "estate-one",
+            "pack_id": "wwi_sqlserver_v1",
+            "justification": "Refuse ambiguous source selection",
+        },
+    )
+    assert response.status_code == 422
+    assert "Several sources" in response.json()["detail"]
+
+
+def test_assessment_only_pack_is_rejected_before_publish(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _claims(monkeypatch, "operator")
+    _execution_fixture(monkeypatch, executable=False)
+    response = client.post(
+        "/api/v1/runs",
+        headers=_headers(**{"Idempotency-Key": "assessment-pack-execution-001"}),
+        json={
+            "estate_id": "estate-one",
+            "source_id": "primary-sql",
+            "pack_id": "wwi_sqlserver_v1",
+            "justification": "Reject an assessment only pack",
+        },
+    )
+    assert response.status_code == 422
+    assert "assessment only" in response.json()["detail"]
 
 
 def test_viewer_cannot_start_assessment(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -178,6 +368,17 @@ def test_fingerprinted_release_assets_are_immutable(client: TestClient) -> None:
     response = client.get("/" + asset.group(1).lstrip("/"))
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+
+
+def test_local_redwood_2013_theme_is_loaded_and_immutable(client: TestClient) -> None:
+    index = client.get("/overview")
+    theme = "/styles/redwood/20.1.3/web/redwood.min.css"
+    assert theme in index.text
+    response = client.get(theme)
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+    assert "oj-theme-json" in response.text
+    assert 'jetReleaseVersion":"v20.1.3' in response.text
 
 
 def test_release_assets_are_referenced_absolutely(client: TestClient) -> None:

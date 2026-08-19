@@ -27,7 +27,27 @@ immutable one-year cache policy.
 Configure the modular Firebase web SDK with `FIREBASE_API_KEY`,
 `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, and `FIREBASE_APP_ID` (the
 gitignored legacy `static/firebase-config.js` remains a local compatibility
-source). Every `/api/v1` data endpoint verifies the Firebase ID token.
+source). Every `/api/v1` data endpoint verifies the Firebase ID token. The
+login page supports both Google and Firebase Email/Password. Enable the
+Email/Password provider in Firebase Authentication before using the latter.
+
+For a dedicated browser E2E identity, provision the account from the backend;
+the login page deliberately cannot grant its own roles:
+
+```bash
+python tools/provision_e2e_user.py --email control-tower-e2e@your-domain.com
+```
+
+The command prompts for a password without echoing or storing it and grants the
+test account `viewer`, `operator`, and `approver` through wildcard
+`estate_roles` claims. Set `CONTROL_TOWER_E2E_EMAIL_DOMAIN=your-domain.com` to
+reject accidental provisioning outside the expected domain. Existing normal
+accounts are protected: the command refuses to alter one unless
+`--authorize-existing` is supplied explicitly. Remove a dedicated account with:
+
+```bash
+python tools/provision_e2e_user.py --email control-tower-e2e@your-domain.com --delete
+```
 
 Roles are Firebase custom claims:
 
@@ -76,6 +96,13 @@ same-origin client.
   checks at 1440/1024/768/390 px, keyboard navigation, axe, table controls,
   and status semantics. The command compiles a test-only authenticated shell;
   a normal `npm run build` hard-disables and tree-shakes that fixture.
+- `npm run test:e2e:live` — separately labelled, authenticated live smoke test
+  from estate creation through SQL validation, assessment, pack-driven
+  execution, approval, and `COMPLETE`. Start the production server first and
+  provide `CONTROL_TOWER_E2E_EMAIL`, `CONTROL_TOWER_E2E_PASSWORD`, and a unique
+  `CONTROL_TOWER_E2E_ESTATE_ID`. Provision and delete the marked Firebase test
+  user with `python -m tools.provision_e2e_user`; the password is read from the
+  environment and is never written to the repository.
 - `npm run build` — hashed Oracle JET release bundle with lazy Lineage and
   Evaluations modules.
 - `pytest tests/test_frontend_v1.py` — API contract, RBAC, idempotency-header,

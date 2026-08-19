@@ -41,6 +41,7 @@ AGENTS = [
         "capabilities": ["discovery.catalog.estate"],
         "handler": "agents.discovery.agent:discover_estate",
         "permissions_key": "discovery",
+        "version": "1.1.0",
     },
     {
         "agent_id": "lineage-agent",
@@ -92,7 +93,7 @@ def main() -> None:
         card = {
             "agent_id": spec["agent_id"],
             "display_name": spec["display_name"],
-            "version": "1.0.0",
+            "version": spec.get("version", "1.0.0"),
             "owner": OWNER,
             "capabilities": spec["capabilities"],
             "handler": spec["handler"],
@@ -102,8 +103,9 @@ def main() -> None:
             "sla": {"p95_latency_ms": 45000, "max_retries": 3, "timeout_ms": 120000},
         }
         registry.publish(card, published_by=PUBLISHED_BY)
-        approved = registry.approve(spec["agent_id"], "1.0.0", approved_by=APPROVED_BY)
-        print(f"[registry-seed] {spec['agent_id']} v1.0.0 -> {approved['status']}")
+        version = spec.get("version", "1.0.0")
+        approved = registry.approve(spec["agent_id"], version, approved_by=APPROVED_BY)
+        print(f"[registry-seed] {spec['agent_id']} v{version} -> {approved['status']}")
 
     print(f"\n[registry-seed] {len(AGENTS)} agent cards published and approved.")
 

@@ -461,7 +461,12 @@ def application_shell(full_path: str) -> FileResponse:
             # Only fingerprinted release assets are immutable. Oracle JET also
             # emits a few stable loader names, which must be revalidated.
             fingerprinted = bool(re.search(r"[.-][0-9a-f]{8,}[.-]", requested.name, re.IGNORECASE))
-            cache = "public, max-age=31536000, immutable" if fingerprinted else "no-cache"
+            versioned_jet_theme = full_path.startswith("styles/redwood/20.1.3/")
+            cache = (
+                "public, max-age=31536000, immutable"
+                if fingerprinted or versioned_jet_theme
+                else "no-cache"
+            )
             return FileResponse(str(requested), headers={"Cache-Control": cache})
         index_path = DIST_DIR / "index.html"
         if index_path.exists():

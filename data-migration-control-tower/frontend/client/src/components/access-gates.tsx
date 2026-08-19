@@ -8,6 +8,7 @@
  */
 
 import { h } from "preact";
+import { useState } from "preact/hooks";
 import { Icon } from "./icons";
 
 export function AccessLevels() {
@@ -42,12 +43,29 @@ export function AccessLevels() {
 export function AuthenticationGate({
   configured,
   error,
-  onSignIn,
+  onGoogleSignIn,
+  onPasswordSignIn,
 }: {
   configured: boolean;
   error?: string | null;
-  onSignIn: () => void;
+  onGoogleSignIn: () => Promise<void>;
+  onPasswordSignIn: (email: string, password: string) => Promise<void>;
 }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState<"password" | "google" | null>(null);
+
+  const run = async (provider: "password" | "google", action: () => Promise<void>) => {
+    setBusy(provider);
+    try {
+      await action();
+    } catch {
+      // The parent owns the user-facing, enumeration-safe error message.
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <main class="auth-page">
       <section class="auth-card" aria-labelledby="auth-title">
@@ -69,13 +87,62 @@ export function AuthenticationGate({
           </div>
         )}
         {configured ? (
-          <button
-            class="button button-primary auth-action"
-            type="button"
-            onClick={onSignIn}
-          >
-            <Icon name="user" /> Sign in with Google
-          </button>
+          <div class="auth-methods">
+            <form
+              class="password-signin"
+              aria-label="Domain email sign in"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void run("password", () => onPasswordSignIn(email, password));
+              }}
+            >
+              <label class="auth-field">
+                <span>Domain email address</span>
+                <input
+                  type="email"
+                  name="email"
+                  value={email}
+                  autoComplete="username"
+                  inputMode="email"
+                  required
+                  disabled={busy !== null}
+                  onInput={(event) => setEmail(event.currentTarget.value)}
+                />
+              </label>
+              <label class="auth-field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  name="password"
+                  value={password}
+                  autoComplete="current-password"
+                  required
+                  disabled={busy !== null}
+                  onInput={(event) => setPassword(event.currentTarget.value)}
+                />
+              </label>
+              <button
+                class="button button-primary auth-action"
+                type="submit"
+                disabled={busy !== null}
+                aria-busy={busy === "password"}
+              >
+                <Icon name="user" /> {busy === "password" ? "Signing in…" : "Sign in with email"}
+              </button>
+            </form>
+
+            <div class="auth-divider" role="separator"><span>or</span></div>
+
+            <button
+              class="button auth-action auth-google"
+              type="button"
+              disabled={busy !== null}
+              aria-busy={busy === "google"}
+              onClick={() => void run("google", onGoogleSignIn)}
+            >
+              <Icon name="user" /> {busy === "google" ? "Opening Google…" : "Continue with Google"}
+            </button>
+          </div>
         ) : (
           <div class="inline-alert warning" role="status">
             Firebase authentication is not configured. Set{" "}
@@ -83,8 +150,8 @@ export function AuthenticationGate({
           </div>
         )}
         <p class="auth-footnote">
-          Google confirms who you are; your access level is granted to your
-          account and audited for every action.
+          Firebase confirms who you are. Roles are granted to the account by an
+          administrator and every dashboard action is audited.
         </p>
       </section>
     </main>

@@ -202,6 +202,7 @@ def test_operator_on_one_estate_cannot_start_a_run_on_another(client, monkeypatc
 
 def test_operator_can_start_a_run_on_their_own_estate(client, monkeypatch):
     _token(monkeypatch, {"estate_roles": {"wwi-demo-estate": ["operator"]}})
+    _pack_bound_demo(monkeypatch)
     monkeypatch.setattr(
         "frontend.api_v1.queue_operation",
         lambda **kwargs: {"operation_id": "op_rbac", "status": "published", "event": kwargs["event"]},
@@ -246,6 +247,7 @@ def test_wave_override_authorizes_the_estate_in_the_wave_key(client, monkeypatch
 
 def test_a_legacy_global_operator_token_still_works(client, monkeypatch):
     _token(monkeypatch, {"roles": ["operator"]})
+    _pack_bound_demo(monkeypatch)
     monkeypatch.setattr(
         "frontend.api_v1.queue_operation",
         lambda **kwargs: {"operation_id": "op_legacy", "status": "published"},
@@ -339,6 +341,30 @@ def test_estate_grant_soft_limit_is_documented():
 # --- Execution profiles are estate-scoped (Day 11 Phase 9) ----------------
 
 
+def _pack_bound_demo(monkeypatch):
+    monkeypatch.setattr(
+        "frontend.api_v1._estate",
+        lambda estate_id=None: {
+            "estate_id": estate_id or "wwi-demo-estate",
+            "sources": [{
+                "source_id": "wwi-sqlserver",
+                "adapter": "sqlserver",
+                "pack_id": "wwi_sqlserver_v1",
+            }],
+        },
+    )
+    monkeypatch.setattr(
+        "frontend.api_v1._packs",
+        lambda: [{
+            "pack_id": "wwi_sqlserver_v1",
+            "source_id": "wwi-sqlserver",
+            "estate_file": "simulator/source_setup/estate.yaml",
+            "execution_supported": True,
+        }],
+    )
+    monkeypatch.setattr("tools.pack_loader.adapter_type_for", lambda _pack: "sqlserver")
+
+
 def test_a_profile_from_another_estate_is_rejected(client, monkeypatch):
     """`execution_profile` used to default to "wwi-default" for every
     estate, so a run started against a newly onboarded estate silently
@@ -365,8 +391,9 @@ def test_a_profile_from_another_estate_is_rejected(client, monkeypatch):
 
 def test_an_omitted_profile_resolves_to_the_estates_own(client, monkeypatch):
     _token(monkeypatch, {"roles": ["operator"]})
+    _pack_bound_demo(monkeypatch)
     monkeypatch.setattr(
-        "frontend.api_v1._execution_profiles_for", lambda _estate: ["postgres_retail_v1"]
+        "frontend.api_v1._execution_profiles_for", lambda _estate: ["wwi_sqlserver_v1"]
     )
     captured = {}
     monkeypatch.setattr(
@@ -377,13 +404,15 @@ def test_an_omitted_profile_resolves_to_the_estates_own(client, monkeypatch):
         "/api/v1/runs",
         headers=_headers(**{"Idempotency-Key": "profile-resolve-0002"}),
         json={
-            "pipeline_id": "retail.customers",
-            "estate_id": "retail-postgres-estate",
+            "pipeline_id": "legacy.pipeline",
+            "estate_id": "wwi-demo-estate",
             "justification": "Server resolves the estate's own profile",
         },
     )
     assert response.status_code == 202
-    assert captured["event"]["execution_profile"] == "postgres_retail_v1"
+    assert captured["event"]["pack_id"] == "wwi_sqlserver_v1"
+    assert captured["event"]["source_id"] == "wwi-sqlserver"
+    assert "execution_profile" not in captured["event"]
 
 
 def test_an_ambiguous_profile_must_be_chosen_not_guessed(client, monkeypatch):

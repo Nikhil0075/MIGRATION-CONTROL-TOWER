@@ -965,11 +965,27 @@ function RunsPage(props: PageProps) {
   if (runId) return <RunDetailPage {...props} runId={runId} />;
   const state = useResource<any[]>(estatePath("/api/v1/runs?limit=100", props.activeEstateId));
   const canOperate = (props.estateRoles || props.session.roles).includes("operator");
-  const pipelines = props.activeEstate?.pipeline_options || [];
-  const sources = (props.activeEstate?.sources || []) as any[];
-  const executionSource = sources.find((source) => (source.execution_profiles || []).length) || sources[0];
-  const pipelineId = pipelines[0]?.pipeline_id;
-  const executionProfile = executionSource?.execution_profiles?.[0] || executionSource?.pack_id;
+  const readiness = props.activeEstate?.execution_readiness;
+  const options = readiness?.options || [];
+  const [selectedExecution, setSelectedExecution] = useState("");
+  useEffect(() => {
+    setSelectedExecution(options.length === 1 ? `${options[0].source_id}::${options[0].pack_id}` : "");
+  }, [props.activeEstateId, options.map((option) => `${option.source_id}:${option.pack_id}`).join("|")]);
+  const selected = options.find(
+    (option) => `${option.source_id}::${option.pack_id}` === selectedExecution,
+  );
+  const readinessLoading = Boolean(props.activeEstateId && !props.activeEstate);
+  const disabledReason = readinessLoading
+    ? "Loading execution readiness…"
+    : !canOperate
+      ? "Operator permission is required."
+      : readiness?.status === "blocked"
+        ? readiness.blockers[0]?.message || "No executable Migration Pack is assigned."
+        : readiness?.status === "selection_required" && !selected
+          ? "Select a source and Migration Pack."
+          : !selected
+            ? "No executable Migration Pack is assigned."
+            : null;
   return (
     <>
       <PageHeader
@@ -977,26 +993,45 @@ function RunsPage(props: PageProps) {
         description="Execution state, duration, ownership and evidence across migration runs."
         generatedAt={state.generatedAt}
         actions={
-          <ActionForm
-            title="Start migration"
-            description={pipelineId ? `Start ${pipelineId} using ${executionProfile || "the estate execution profile"}.` : "No executable pipeline has been discovered for this estate."}
-            disabled={!canOperate || !pipelineId || !executionProfile || !props.activeEstateId}
-            onSubmit={async (justification) => {
-              return api("/api/v1/runs", {
-                method: "POST",
-                headers: { "Idempotency-Key": idempotencyKey("migration") },
-                body: JSON.stringify({
-                  pipeline_id: pipelineId,
-                  execution_profile: executionProfile,
-                  estate_id: props.activeEstateId,
-                  justification,
-                }),
-              });
-            }}
-            progressPollIntervalMs={props.progressPollIntervalMs}
-          />
+          <div class="header-action-cluster">
+            {options.length > 1 && (
+              <select
+                aria-label="Source and Migration Pack"
+                value={selectedExecution}
+                onChange={(event) => setSelectedExecution(event.currentTarget.value)}
+              >
+                <option value="">Select source and pack</option>
+                {options.map((option) => (
+                  <option value={`${option.source_id}::${option.pack_id}`}>{option.label}</option>
+                ))}
+              </select>
+            )}
+            <ActionForm
+              title="Start migration"
+              description={selected ? `Start ${selected.pack_id} on ${selected.source_id}.` : disabledReason || "Start the selected Migration Pack."}
+              disabled={Boolean(disabledReason) || !props.activeEstateId}
+              onSubmit={async (justification) => {
+                return api("/api/v1/runs", {
+                  method: "POST",
+                  headers: { "Idempotency-Key": idempotencyKey("migration") },
+                  body: JSON.stringify({
+                    source_id: selected?.source_id,
+                    pack_id: selected?.pack_id,
+                    estate_id: props.activeEstateId,
+                    justification,
+                  }),
+                });
+              }}
+              progressPollIntervalMs={props.progressPollIntervalMs}
+            />
+          </div>
         }
       />
+      {disabledReason && (
+        <div class={`inline-alert ${readinessLoading ? "" : "warning"}`} role="status">
+          {disabledReason}
+        </div>
+      )}
       <PageState loading={state.loading} error={state.error} />
       {state.data && (
         <Panel title="Migration runs" subtitle="Select a row for full evidence">

@@ -77,6 +77,7 @@ RISK_ASSESSED_SUB = "risk-assessed-sub"
 PLAN_CREATED_SUB = "plan-created-sub"
 VALIDATION_REQUESTED_SUB = "validation-requested-sub"
 VALIDATION_PASSED_SUB = "validation-passed-sub"
+APPROVAL_PREPARATION_SUB = "approval-preparation-sub"
 VALIDATION_FAILED_SUB = "validation-failed-sub"
 
 ORACLE_CORPUS_PATH = "simulator/source_setup/oracle_dialect_corpus"
@@ -87,6 +88,7 @@ LINEAGE_CAPABILITY = "lineage.graph.build"
 RISK_CAPABILITY = "risk.assess.estate"
 PLANNER_CAPABILITY = "planner.plan.propose"
 VALIDATION_CAPABILITY = "validation.reconcile.source_target"
+CUTOVER_CAPABILITY = "cutover.request_approval"
 
 # Which tables a run migrates, and on which columns, comes from the run's
 # plan (tools/migration_plan.py) — not from constants here. Removing
@@ -324,9 +326,16 @@ def handle_migration_requested(payload: dict) -> dict:
         logger.info("migration.requested -> resuming existing run %s after a crash-recovery redo", run_id)
 
     with tracing.span("handle_migration_requested", run_id=run_id, pipeline_id=pipeline_id):
-        (table_records, pipeline_records), agent_id, version = registry.invoke_capability(
-            DISCOVERY_CAPABILITY, ORACLE_CORPUS_PATH, DAG_ARTIFACTS_PATH
-        )
+        if estate_id:
+            (table_records, pipeline_records), agent_id, version = registry.invoke_capability(
+                DISCOVERY_CAPABILITY, estate_id=estate_id
+            )
+        else:
+            # Compatibility path for events created before estate_id became
+            # canonical. New API requests never use fixed corpus paths.
+            (table_records, pipeline_records), agent_id, version = registry.invoke_capability(
+                DISCOVERY_CAPABILITY, ORACLE_CORPUS_PATH, DAG_ARTIFACTS_PATH
+            )
         pin_agent_version(run_id, agent_id, version)
         logger.info("resolved %s (capability=%s) -> v%s", agent_id, DISCOVERY_CAPABILITY, version)
 
@@ -660,6 +669,49 @@ def handle_validation_requested(payload: dict) -> dict:
     result_out = {"run_id": run_id, "overall_status": result["overall_status"], "checks": result["checks"]}
     _dedup_complete(payload, "handle_validation_requested", result_out)
     return result_out
+
+
+def handle_validation_passed(payload: dict) -> dict:
+    """Prepare the human gate on a dedicated validation.passed subscription.
+
+    The CLI's validation-passed-sub remains an assertion channel. This
+    handler has its own subscription so the long-running console cannot
+    steal the CLI/evaluation message.
+    """
+    status, cached = _dedup_claim(payload, "handle_validation_passed")
+    if status == "done":
+        return cached
+
+    run_id = payload["run_id"]
+    run = get_run(run_id)
+    if run["state"] == "READY_FOR_APPROVAL":
+        from tools.approval_service import get_approval
+
+        approval = get_approval(run_id)
+        if approval is None:
+            raise RuntimeError(
+                f"Run {run_id!r} is READY_FOR_APPROVAL but has no approval request."
+            )
+        agent_id = "cutover-agent"
+        version = (run.get("pinned_agents") or {}).get(agent_id)
+    elif run["state"] == "PASSED":
+        approval, agent_id, version = registry.invoke_capability(CUTOVER_CAPABILITY, run_id)
+        pin_agent_version(run_id, agent_id, version)
+        transition_state(run_id, "READY_FOR_APPROVAL")
+    else:
+        raise RuntimeError(
+            f"Run {run_id!r} cannot prepare approval from state {run['state']!r}."
+        )
+
+    result = {
+        "run_id": run_id,
+        "state": "READY_FOR_APPROVAL",
+        "approval_status": approval.get("status"),
+        "agent_id": agent_id,
+        "version": version,
+    }
+    _dedup_complete(payload, "handle_validation_passed", result)
+    return result
 
 
 def handle_validation_failed(payload: dict) -> dict:

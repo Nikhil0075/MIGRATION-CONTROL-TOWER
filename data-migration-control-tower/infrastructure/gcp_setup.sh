@@ -114,6 +114,7 @@ declare -A SUBSCRIPTIONS=(
   ["plan-created-sub"]="plan.created"
   ["validation-requested-sub"]="validation.requested"
   ["validation-passed-sub"]="validation.passed"
+  ["approval-preparation-sub"]="validation.passed"
   ["validation-failed-sub"]="validation.failed"
   ["assessment-requested-sub"]="assessment.requested"
   ["cutover-approved-sub"]="cutover.approved"

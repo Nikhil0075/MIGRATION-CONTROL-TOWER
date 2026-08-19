@@ -116,3 +116,22 @@ def test_approval_history_is_append_only():
     approved_entry = next(h for h in history if h["event"] == "APPROVED")
     assert approved_entry["justification"] == "looks good"
     assert approved_entry["approved_by"] == "ops-lead@example.internal"
+
+
+@skip_if_no_firestore
+def test_matching_pending_request_is_reused_without_duplicate_history():
+    from agents.orchestrator.run_lifecycle import delete_run
+    from tools.firestore_client import get_client
+
+    run_id = f"test_run_{uuid.uuid4().hex[:8]}"
+    try:
+        first = approval_service.request_approval(run_id, "same-hash", requested_by="cutover-agent")
+        second = approval_service.request_approval(run_id, "same-hash", requested_by="cutover-agent")
+        history = list(
+            get_client().collection("migration_runs").document(run_id)
+            .collection("approval_history").stream()
+        )
+        assert second == first
+        assert len(history) == 1
+    finally:
+        delete_run(run_id)

@@ -49,7 +49,7 @@ consumers now run *inside* that same process — so a click is the whole
 action, not the first half of one. There is no worker script to run per
 click any more.
 
-Check it once, in the console: **System Health → Event consumers**. Eight
+Check it once, in the console: **System Health → Event consumers**. Nine
 consumers, `idle`, lease held by this process. That panel is also the
 answer whenever an operation sits at `queued` — see "When something does
 not happen" below.
@@ -69,7 +69,23 @@ target writes.
 
 ### A1. Sign in
 
-http://127.0.0.1:8080 → **Sign in with Google**.
+Open http://127.0.0.1:8080. Use Google, or enter a provisioned domain email and
+password. The sign-in method proves identity only; neither option lets the user
+choose operator or approver access.
+
+To create a dedicated full-flow test identity, run once from the repository
+root and enter a strong password at the no-echo prompts:
+
+```bash
+python tools/provision_e2e_user.py --email control-tower-e2e@your-domain.com
+```
+
+The Firebase Email/Password provider must be enabled. The command grants the
+dedicated account wildcard `viewer`, `operator`, and `approver` custom claims,
+which are enough to perform the complete assessment, migration, worker-control,
+and cutover flow. Optionally set `CONTROL_TOWER_E2E_EMAIL_DOMAIN` in `.env` to
+lock provisioning to your corporate domain. Delete the test identity after the
+exercise with the same command plus `--delete`.
 
 Your account needs a role. Roles are granted, never chosen at sign-in —
 otherwise anyone with a Google account could self-grant operator. For local
@@ -148,7 +164,19 @@ lineage and risk coverage.
 
 ## Path B — the full lifecycle, to cutover
 
-Only `wwi-demo-estate` supports execution. This **writes to BigQuery**.
+Any registered SQL Server source assigned the executable
+`wwi_sqlserver_v1` Migration Pack supports this path. A discovered DAG
+pipeline is optional: the pack is the execution entry point and supplies the
+derived pipeline identifier when none exists. This **writes to BigQuery**.
+
+For an existing deployment, inspect the targeted demo repair before applying
+it. The command changes only a missing demo `pack_id`, preserves every other
+field, records a revision, and refuses a conflicting value:
+
+```bash
+python -m tools.backfill_demo_pack
+python -m tools.backfill_demo_pack --apply
+```
 
 ### B1. One command, end to end
 
@@ -177,7 +205,10 @@ What to watch for in the output:
    consumer takes it from there; discovery, risk, planning, execution and
    validation each publish the next event and the next consumer picks it
    up. The seeded row-loss defect is recovered without a manual step.
-2. Watch **Runs** advance to `PASSED`, then `READY_FOR_APPROVAL`.
+2. Watch **Runs** advance to `PASSED`. The dedicated `approval` consumer on
+   `approval-preparation-sub` requests cutover approval idempotently and moves
+   the run to `READY_FOR_APPROVAL`; `validation-passed-sub` remains reserved
+   for CLI/evaluation assertions.
 3. **Approve** in the console, with a justification. This is the human
    action and a distinct identity from every agent — the Cutover agent
    still cannot approve itself, and the token is bound to the plan hash,
@@ -193,6 +224,17 @@ reported as one that did.
 `agents/cutover/approve_cutover.py` remains the CLI equivalent of step 3.
 Only it and the console approval endpoint call `approve()` — never agent
 code.
+
+For a separately labelled live browser acceptance run, start the built app,
+provision a marked Firebase test identity, and execute:
+
+```bash
+npm run test:e2e:live --prefix frontend/client
+```
+
+Set `CONTROL_TOWER_E2E_EMAIL`, `CONTROL_TOWER_E2E_PASSWORD`, and a unique
+`CONTROL_TOWER_E2E_ESTATE_ID` in the invoking process. Delete the identity
+afterward with `python -m tools.provision_e2e_user --email <address> --delete`.
 
 ---
 

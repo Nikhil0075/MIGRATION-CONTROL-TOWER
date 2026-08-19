@@ -418,6 +418,7 @@ def default_specs() -> list[ConsumerSpec]:
         ConsumerSpec("risk", orch.RISK_ASSESSED_SUB, orch.handle_risk_assessed),
         ConsumerSpec("plan", orch.PLAN_CREATED_SUB, orch.handle_planned),
         ConsumerSpec("validation", orch.VALIDATION_REQUESTED_SUB, orch.handle_validation_requested),
+        ConsumerSpec("approval", orch.APPROVAL_PREPARATION_SUB, orch.handle_validation_passed),
         ConsumerSpec("recovery", orch.VALIDATION_FAILED_SUB, orch.handle_validation_failed),
         ConsumerSpec("cutover", "cutover-approved-sub", handle_cutover_approved),
         # NOT validation-passed-sub. advance_through_validation consumes it

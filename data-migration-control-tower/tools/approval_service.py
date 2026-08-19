@@ -43,6 +43,16 @@ def _record_history(run_id: str, event: str, record: dict) -> None:
 
 def request_approval(run_id: str, plan_hash: str, requested_by: str) -> dict:
     """Called by the Cutover Agent: opens a PENDING approval request."""
+    current = get_approval(run_id)
+    if (
+        current
+        and current.get("status") == "PENDING"
+        and current.get("plan_hash") == plan_hash
+        and current.get("requested_by") == requested_by
+    ):
+        # Pub/Sub redelivery must not overwrite requested_at or append a
+        # second audit event for the same logical approval request.
+        return current
     record = {
         "status": "PENDING",
         "plan_hash": plan_hash,

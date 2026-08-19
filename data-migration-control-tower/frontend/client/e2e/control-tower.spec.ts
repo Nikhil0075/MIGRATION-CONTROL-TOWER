@@ -36,7 +36,7 @@ const fixtureByPath: Record<string, unknown> = {
     latency: {},
   },
   "/api/v1/estates": [
-    { estate_id: "wwi-demo-estate", display_name: "Worldwide Importers", status: "ACTIVE", owner: "Data Platform", health: "HEALTHY", objects: 58, pipelines: 4, pipeline_options: [{ pipeline_id: "wwi.sales.customers", name: "Customers" }], sources: [{ source_id: "wwi-sqlserver", adapter: "sqlserver", health: "HEALTHY", execution_profiles: ["wwi-default"] }], target: { system: "BigQuery", dataset_env: "Production" } },
+    { estate_id: "wwi-demo-estate", display_name: "Worldwide Importers", status: "ACTIVE", owner: "Data Platform", health: "HEALTHY", objects: 58, pipelines: 4, pipeline_options: [{ pipeline_id: "wwi.sales.customers", name: "Customers" }], sources: [{ source_id: "wwi-sqlserver", adapter: "sqlserver", health: "HEALTHY", pack_id: "wwi_sqlserver_v1" }], execution_readiness: { status: "ready", options: [{ source_id: "wwi-sqlserver", pack_id: "wwi_sqlserver_v1", label: "wwi-sqlserver · WWI SQL Server" }], blockers: [] }, target: { system: "BigQuery", dataset_env: "Production" } },
     { estate_id: "retail-postgres-estate", display_name: "Retail PostgreSQL", status: "ACTIVE", objects: 12, pipelines: 1, sources: [{ source_id: "retail-postgres", adapter: "postgres", health: "HEALTHY" }], target: { system: "BigQuery" } },
   ],
   "/api/v1/assessments": { packs: [{ pack_id: "wwi", label: "WWI", execution_supported: true }], runs: [] },
@@ -173,6 +173,20 @@ test("tables expose accessible controls and never encode status by color alone",
   await page.getByRole("columnheader", { name: /Run/ }).getByRole("button").click();
   await page.locator("summary", { hasText: "Columns" }).click();
   await expect(page.getByLabel("Updated")).toBeVisible();
+});
+
+test("loads the local JET 20.1.3 Redwood theme without a CSS compatibility warning", async ({ page }) => {
+  await installApiFixtures(page);
+  const compatibilityWarnings: string[] = [];
+  page.on("console", (message) => {
+    if (/theme.*(incompatible|version)|incompatible.*css/i.test(message.text())) {
+      compatibilityWarnings.push(message.text());
+    }
+  });
+  await page.goto("/overview");
+  await expect(page.locator('link[href="/styles/redwood/20.1.3/web/redwood.min.css"]')).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  expect(compatibilityWarnings).toEqual([]);
 });
 
 test("action dialogs close with Escape, preserve focus, and show measured operation progress", async ({ page }) => {

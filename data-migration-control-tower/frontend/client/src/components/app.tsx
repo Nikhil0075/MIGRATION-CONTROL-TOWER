@@ -7,7 +7,13 @@ import { h } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { User } from "firebase/auth";
 import { publicApi, api } from "../api";
-import { initializeAuthentication, signIn, signOutUser } from "../auth";
+import {
+  authenticationErrorMessage,
+  initializeAuthentication,
+  signInWithGoogle,
+  signInWithPassword,
+  signOutUser,
+} from "../auth";
 import { EstateSummary, NavItem, Role, RuntimeConfig, Session } from "../models";
 import { Icon } from "./icons";
 import { AuthenticationGate, NoAccessGate } from "./access-gates";
@@ -269,6 +275,7 @@ export const App = registerCustomElement("app-root", (_props: Props) => {
           return;
         }
         unsubscribe = initializeAuthentication(result.data.firebase, (user) => {
+          if (user) setAuthError(null);
           setFirebaseUser(user);
           setAuthReady(true);
         });
@@ -393,9 +400,23 @@ export const App = registerCustomElement("app-root", (_props: Props) => {
       <AuthenticationGate
         configured={config.authentication_configured}
         error={authError}
-        onSignIn={() => {
+        onGoogleSignIn={async () => {
           setAuthError(null);
-          void signIn().catch((reason) => setAuthError(reason.message || String(reason)));
+          try {
+            await signInWithGoogle();
+          } catch (reason) {
+            setAuthError(authenticationErrorMessage(reason));
+            throw reason;
+          }
+        }}
+        onPasswordSignIn={async (email, password) => {
+          setAuthError(null);
+          try {
+            await signInWithPassword(email, password);
+          } catch (reason) {
+            setAuthError(authenticationErrorMessage(reason));
+            throw reason;
+          }
         }}
       />
     );

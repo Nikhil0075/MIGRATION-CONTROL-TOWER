@@ -59,6 +59,42 @@ def test_pull_or_timeout_returns_first_message(monkeypatch):
 
 
 @skip_if_no_firestore
+def test_migration_requested_uses_canonical_binding_and_estate_discovery(monkeypatch):
+    from agents.orchestrator.run_lifecycle import delete_run, get_run
+
+    invoked = []
+    published = []
+
+    def invoke(capability, *args, **kwargs):
+        invoked.append((capability, args, kwargs))
+        return ([], []), "discovery-agent", "1.1.0"
+
+    monkeypatch.setattr(orchestrator.registry, "invoke_capability", invoke)
+    monkeypatch.setattr(orchestrator, "publish", lambda topic, payload: published.append((topic, payload)))
+    result = orchestrator.handle_migration_requested({
+        "pipeline_id": "wwi_sqlserver_v1",
+        "estate_id": "estate-one",
+        "source_id": "primary-sql",
+        "pack_id": "wwi_sqlserver_v1",
+        "drop_fraction": 0.0,
+    })
+    try:
+        run = get_run(result["run_id"])
+        assert run["pipeline_id"] == "wwi_sqlserver_v1"
+        assert run["estate_id"] == "estate-one"
+        assert run["source_id"] == "primary-sql"
+        assert run["pack_id"] == "wwi_sqlserver_v1"
+        assert invoked == [(
+            orchestrator.DISCOVERY_CAPABILITY,
+            (),
+            {"estate_id": "estate-one"},
+        )]
+        assert published == [("discovery.completed", {"run_id": result["run_id"]})]
+    finally:
+        delete_run(result["run_id"])
+
+
+@skip_if_no_firestore
 def test_open_incident_finds_pending_and_ignores_resolved():
     from tools.firestore_client import get_client
 
@@ -144,6 +180,40 @@ def test_handle_validation_requested_publishes_failed_and_transitions(monkeypatc
         assert ("validation.failed", {"run_id": run_id}) in published
     finally:
         delete_run(run_id)
+
+
+@skip_if_no_firestore
+def test_validation_passed_prepares_approval_idempotently(monkeypatch):
+    from agents.orchestrator.run_lifecycle import create_run, delete_run, get_run, transition_state
+
+    run_id = create_run("test.orchestrator.approval_preparation")
+    message_id = f"test-{uuid.uuid4().hex}"
+    calls = []
+    try:
+        for state in (
+            "DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED",
+            "MIGRATING", "VALIDATING", "PASSED",
+        ):
+            transition_state(run_id, state)
+
+        def invoke(capability, requested_run_id):
+            calls.append((capability, requested_run_id))
+            return {"status": "PENDING"}, "cutover-agent", "1.0.0"
+
+        monkeypatch.setattr(orchestrator.registry, "invoke_capability", invoke)
+        payload = {"run_id": run_id, "_pubsub_message_id": message_id}
+        first = orchestrator.handle_validation_passed(payload)
+        second = orchestrator.handle_validation_passed(payload)
+
+        assert calls == [(orchestrator.CUTOVER_CAPABILITY, run_id)]
+        assert first["state"] == "READY_FOR_APPROVAL"
+        assert second.get("deduped") is True
+        assert get_run(run_id)["state"] == "READY_FOR_APPROVAL"
+    finally:
+        delete_run(run_id)
+        get_client_for_test().collection("processed_messages").document(
+            f"handle_validation_passed:{message_id}"
+        ).delete()
 
 
 @skip_if_no_firestore

@@ -643,6 +643,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workers
+         * @description Per-consumer state plus who holds the worker lease.
+         *
+         *     Deliberately not estate-scoped, and readable by any viewer: the
+         *     consumer fleet is a property of the process, not of an estate, and it
+         *     carries no estate data — only subscription names and counters.
+         */
+        get: operations["workers_api_v1_workers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workers/{name}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Worker Paused
+         * @description Pauses or resumes one consumer, or "all".
+         *
+         *     NOT estate-scoped, and one of the few mutating routes that does not
+         *     call authorize_estate — see NON_ESTATE_MUTATING_ROUTES in
+         *     tests/test_estate_rbac.py. A consumer serves every estate on the
+         *     subscription, so there is no estate to authorize against; picking one
+         *     would misrepresent the blast radius rather than contain it. The
+         *     coarse `operator` role plus a recorded justification is the control.
+         *
+         *     Pause is durable (Firestore worker_controls/{name}), not a local flag:
+         *     on Cloud Run this request lands on an arbitrary instance, very likely
+         *     not the lease holder, and an in-process flag would silently do
+         *     nothing. It also has to survive a restart — a consumer paused for a
+         *     reason must not resume itself on the next deploy.
+         *
+         *     No Idempotency-Key: pausing a paused consumer is a no-op with no
+         *     data-plane effect. It is still attributed, through operation_audit.
+         */
+        post: operations["set_worker_paused_api_v1_workers__name___action__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/legacy": {
         parameters: {
             query?: never;
@@ -828,8 +888,12 @@ export interface components {
         };
         /** StartRunRequest */
         StartRunRequest: {
+            /** Source Id */
+            source_id?: string | null;
+            /** Pack Id */
+            pack_id?: string | null;
             /** Pipeline Id */
-            pipeline_id: string;
+            pipeline_id?: string | null;
             /** Execution Profile */
             execution_profile?: string | null;
             /**
@@ -885,6 +949,11 @@ export interface components {
              * @default wwi-demo-estate
              */
             estate_id: string;
+        };
+        /** WorkerControlRequest */
+        WorkerControlRequest: {
+            /** Justification */
+            justification: string;
         };
     };
     responses: never;
@@ -2144,6 +2213,75 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workers_api_v1_workers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_worker_paused_api_v1_workers__name___action__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                name: string;
+                action: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

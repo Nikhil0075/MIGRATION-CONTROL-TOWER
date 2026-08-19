@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
 import { h } from "preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -80,7 +80,13 @@ describe("evidence presentation", () => {
 describe("access levels on the sign-in screen", () => {
   it("names both access levels and what each can do", async () => {
     const { AuthenticationGate } = await import("./access-gates");
-    render(<AuthenticationGate configured={true} onSignIn={vi.fn()} />);
+    render(
+      <AuthenticationGate
+        configured={true}
+        onGoogleSignIn={vi.fn()}
+        onPasswordSignIn={vi.fn()}
+      />,
+    );
 
     expect(screen.getByText("Operator")).toBeTruthy();
     expect(screen.getByText("Onboards estates")).toBeTruthy();
@@ -88,16 +94,49 @@ describe("access levels on the sign-in screen", () => {
     expect(screen.getByText("Acts on the rest")).toBeTruthy();
   });
 
-  it("offers one sign-in, not a choice of privilege", async () => {
+  it("offers identity providers without offering a choice of privilege", async () => {
     const { AuthenticationGate } = await import("./access-gates");
     const { container } = render(
-      <AuthenticationGate configured={true} onSignIn={vi.fn()} />,
+      <AuthenticationGate
+        configured={true}
+        onGoogleSignIn={vi.fn()}
+        onPasswordSignIn={vi.fn()}
+      />,
     );
-    // Two "sign in as <role>" buttons would imply you can self-select
-    // privilege. Google proves identity; the role is granted to the account.
+    // Providers prove identity; neither button chooses operator/approver.
     const buttons = Array.from(container.querySelectorAll("button"));
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0].textContent).toMatch(/Sign in with Google/);
+    expect(buttons).toHaveLength(2);
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      expect.stringMatching(/Sign in with email/),
+      expect.stringMatching(/Continue with Google/),
+    ]);
+    expect(screen.queryByText(/sign in as operator/i)).toBeNull();
+    expect(screen.queryByText(/sign in as approver/i)).toBeNull();
+  });
+
+  it("submits a domain email and password without exposing the password", async () => {
+    const { AuthenticationGate } = await import("./access-gates");
+    const onPasswordSignIn = vi.fn(async () => undefined);
+    const { container } = render(
+      <AuthenticationGate
+        configured={true}
+        onGoogleSignIn={vi.fn()}
+        onPasswordSignIn={onPasswordSignIn}
+      />,
+    );
+    const email = screen.getByLabelText("Domain email address") as HTMLInputElement;
+    const password = screen.getByLabelText("Password") as HTMLInputElement;
+    fireEvent.input(email, { target: { value: "operator@example.test" } });
+    fireEvent.input(password, { target: { value: "not-rendered-after-submit" } });
+    (screen.getByRole("button", { name: /Sign in with email/ }) as HTMLButtonElement).click();
+    await vi.waitFor(() => {
+      expect(onPasswordSignIn).toHaveBeenCalledWith(
+        "operator@example.test",
+        "not-rendered-after-submit",
+      );
+    });
+    expect(password.type).toBe("password");
+    expect(container.textContent).not.toContain("not-rendered-after-submit");
   });
 
   it("tells a role-less account how to get access instead of 403ing silently", async () => {
@@ -240,5 +279,99 @@ describe("workers panel", () => {
     });
     render(<PageRouter {...operatorProps} />);
     expect(await screen.findByRole("button", { name: "Resume plan" })).toBeTruthy();
+  });
+});
+
+describe("pack-driven migration readiness", () => {
+  const readyEstate = {
+    estate_id: "sql-estate",
+    display_name: "SQL estate",
+    status: "ACTIVE",
+    sources: [{ source_id: "primary", adapter: "sqlserver", pack_id: "wwi_sqlserver_v1" }],
+    pipeline_options: [],
+    execution_readiness: {
+      status: "ready" as const,
+      options: [{ source_id: "primary", pack_id: "wwi_sqlserver_v1", label: "Primary SQL · WWI" }],
+      blockers: [],
+    },
+  };
+
+  it("enables a SQL-only estate from its executable pack without a DAG pipeline", async () => {
+    mockApi({ "/api/v1/runs": [] });
+    render(
+      <PageRouter
+        {...operatorProps}
+        route="runs"
+        activeEstateId="sql-estate"
+        activeEstate={readyEstate}
+      />,
+    );
+    const start = await screen.findByRole("button", { name: "Start migration" }) as HTMLButtonElement;
+    expect(start.disabled).toBe(false);
+    expect(screen.queryByText(/pipeline has been discovered/i)).toBeNull();
+  });
+
+  it("requires an explicit choice when several pack bindings are executable", async () => {
+    mockApi({ "/api/v1/runs": [] });
+    const estate = {
+      ...readyEstate,
+      execution_readiness: {
+        status: "selection_required" as const,
+        blockers: [],
+        options: [
+          ...readyEstate.execution_readiness.options,
+          { source_id: "secondary", pack_id: "wwi_sqlserver_v1", label: "Secondary SQL · WWI" },
+        ],
+      },
+    };
+    render(
+      <PageRouter {...operatorProps} route="runs" activeEstateId="sql-estate" activeEstate={estate} />,
+    );
+    expect(await screen.findByText("Select a source and Migration Pack.")).toBeTruthy();
+    const start = screen.getByRole("button", { name: "Start migration" }) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    const select = screen.getByLabelText("Source and Migration Pack") as HTMLSelectElement;
+    select.value = "primary::wwi_sqlserver_v1";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(start.disabled).toBe(false));
+  });
+
+  it.each([
+    ["No executable Migration Pack is assigned.", "NO_EXECUTABLE_PACK"],
+    ["The selected pack supports assessment only.", "ASSESSMENT_ONLY_PACK"],
+  ])("shows the exact backend blocker: %s", async (message, code) => {
+    mockApi({ "/api/v1/runs": [] });
+    render(
+      <PageRouter
+        {...operatorProps}
+        route="runs"
+        activeEstateId="sql-estate"
+        activeEstate={{
+          ...readyEstate,
+          execution_readiness: { status: "blocked", options: [], blockers: [{ code, message }] },
+        }}
+      />,
+    );
+    expect(await screen.findByText(message)).toBeTruthy();
+  });
+
+  it("distinguishes missing permission from configuration", async () => {
+    mockApi({ "/api/v1/runs": [] });
+    render(
+      <PageRouter
+        {...pageProps}
+        route="runs"
+        activeEstateId="sql-estate"
+        activeEstate={readyEstate}
+      />,
+    );
+    expect(await screen.findByText("Operator permission is required.")).toBeTruthy();
+  });
+
+  it("keeps loading distinct from a configuration blocker", async () => {
+    mockApi({ "/api/v1/runs": [] });
+    render(<PageRouter {...operatorProps} route="runs" activeEstateId="sql-estate" />);
+    expect(await screen.findByText("Loading execution readiness…")).toBeTruthy();
+    expect(screen.queryByText("No executable Migration Pack is assigned.")).toBeNull();
   });
 });

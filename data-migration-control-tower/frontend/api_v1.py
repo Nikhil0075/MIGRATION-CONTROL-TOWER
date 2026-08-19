@@ -80,12 +80,11 @@ class StartAssessmentRequest(BaseModel):
 
 
 class StartRunRequest(BaseModel):
-    pipeline_id: str = Field(min_length=2, max_length=200)
-    # No default. A profile that belongs to a different estate is exactly
-    # the cross-estate mistake this phase exists to prevent, and
-    # "wwi-default" was silently applied to every estate. Omit it and the
-    # server resolves the estate's own profile; supply one and it must be
-    # offered by that estate.
+    source_id: str | None = Field(default=None, min_length=2, max_length=100)
+    pack_id: str | None = Field(default=None, min_length=2, max_length=100)
+    pipeline_id: str | None = Field(default=None, min_length=2, max_length=200)
+    # Deprecated compatibility alias for one release. New callers send
+    # pack_id; disagreement is rejected instead of silently picking one.
     execution_profile: str | None = Field(default=None, min_length=2, max_length=100)
     estate_id: str = Field(default=DEFAULT_ESTATE_ID, min_length=2, max_length=100)
     justification: str = Field(min_length=8, max_length=2000)
@@ -210,6 +209,7 @@ def _envelope(data: Any, *, total: int | None = None, next_cursor: str | None = 
 # immediately. Set UI_CACHE_TTL_SECONDS=0 to disable entirely.
 _CACHE_TTL_SECONDS = float(os.environ.get("UI_CACHE_TTL_SECONDS", "60"))
 _response_cache: dict[str, tuple[float, dict]] = {}
+_cache_generation = 0
 
 
 def _cached(key: str, build) -> dict:
@@ -226,17 +226,25 @@ def _cached(key: str, build) -> dict:
     if hit and time.monotonic() < hit[0]:
         payload = hit[1]
         return {**payload, "meta": {**payload["meta"], "freshness": "cached"}}
+    generation = _cache_generation
     value = build()
     # Expiry is measured from when the build FINISHED, not when it started.
     # Measuring from the start meant a build slower than the TTL stored an
     # already-expired entry, so the most expensive endpoints — the only ones
     # that needed caching — never got a hit.
-    _response_cache[key] = (time.monotonic() + _CACHE_TTL_SECONDS, value)
+    # A write may clear the cache while this slow Firestore read is still
+    # running. Never let that older read repopulate the cache after the
+    # write; the next request must rebuild from post-write state.
+    if generation == _cache_generation:
+        _response_cache[key] = (time.monotonic() + _CACHE_TTL_SECONDS, value)
     return value
 
 
 def clear_response_cache() -> None:
     """Called after a write so an operator sees their own action immediately."""
+    global _cache_generation
+
+    _cache_generation += 1
     _response_cache.clear()
 
 
@@ -350,8 +358,23 @@ def _run_progress(run: dict) -> dict:
     if stage == "MIGRATING" and run_id and len(stages) > completed + 1:
         plans = _collection_docs(run_id, "migration_plan")
         jobs = _collection_docs(run_id, "migration_executions")
-        total_jobs = sum(1 for item in plans if item.get("scheduled") and not item.get("blocked"))
-        done_jobs = sum(1 for item in jobs if item.get("status") in {"COMPLETE", "SUCCEEDED", "DONE"})
+        targets = [
+            target
+            for plan in plans
+            for target in (plan.get("targets") or [])
+            if target.get("scheduled") and not target.get("blocked")
+        ]
+        target_ids = {target.get("target_id") for target in targets if target.get("target_id")}
+        total_jobs = len(target_ids) or len(targets)
+        completed_target_ids = {
+            item.get("target_id")
+            for item in jobs
+            if item.get("status") in {"COMPLETED", "COMPLETE", "SUCCEEDED", "DONE"}
+            and item.get("target_id")
+        }
+        done_jobs = len(completed_target_ids) if target_ids else sum(
+            1 for item in jobs if item.get("status") in {"COMPLETED", "COMPLETE", "SUCCEEDED", "DONE"}
+        )
         if total_jobs:
             segment = 100 / (len(stages) - 1)
             percent = round(min(100, percent + segment * min(done_jobs, total_jobs) / total_jobs))
@@ -673,9 +696,74 @@ def _sanitized_estate(estate: dict, latest: dict | None = None) -> dict:
             {"pipeline_id": item.get("pipeline_id"), "name": item.get("name") or item.get("pipeline_id")}
             for item in pipelines if item.get("pipeline_id")
         ],
+        "execution_readiness": _execution_readiness(estate),
         "latest_run_id": (latest or {}).get("run_id"),
         "last_run_at": (latest or {}).get("created_at"),
     }
+
+
+def _source_declares_pack(source: dict, pack_id: str) -> bool:
+    return source.get("pack_id") == pack_id or pack_id in (source.get("execution_profiles") or [])
+
+
+def _execution_readiness(estate: dict) -> dict:
+    """Authoritative, stable reasons why an estate can or cannot execute."""
+    from tools.pack_loader import adapter_type_for
+
+    packs = {pack["pack_id"]: pack for pack in _packs()}
+    options: list[dict] = []
+    blockers: list[dict] = []
+    assigned = False
+    for source in estate.get("sources") or []:
+        declared = [source.get("pack_id"), *(source.get("execution_profiles") or [])]
+        for pack_id in dict.fromkeys(item for item in declared if item):
+            assigned = True
+            pack = packs.get(pack_id)
+            if pack is None:
+                blockers.append({
+                    "code": "UNKNOWN_PACK",
+                    "message": f"Migration Pack {pack_id!r} is not registered.",
+                })
+                continue
+            if not pack.get("execution_supported"):
+                blockers.append({
+                    "code": "ASSESSMENT_ONLY_PACK",
+                    "message": "The selected pack supports assessment only.",
+                })
+                continue
+            try:
+                wanted_adapter = adapter_type_for(pack)
+            except Exception:  # noqa: BLE001 - readiness is an operator status, not a crash
+                wanted_adapter = None
+            if wanted_adapter != source.get("adapter"):
+                blockers.append({
+                    "code": "ADAPTER_INCOMPATIBLE",
+                    "message": (
+                        f"Migration Pack {pack_id!r} does not support source "
+                        f"{source.get('source_id')!r}."
+                    ),
+                })
+                continue
+            option = {
+                "source_id": source["source_id"],
+                "pack_id": pack_id,
+                "label": f"{source['source_id']} · {pack.get('name') or pack_id}",
+            }
+            if option not in options:
+                options.append(option)
+
+    if options:
+        return {
+            "status": "ready" if len(options) == 1 else "selection_required",
+            "options": options,
+            "blockers": [],
+        }
+    if not assigned:
+        blockers = [{
+            "code": "NO_EXECUTABLE_PACK",
+            "message": "No executable Migration Pack is assigned.",
+        }]
+    return {"status": "blocked", "options": [], "blockers": blockers}
 
 
 @public_router.get("/config", response_model=Envelope)
@@ -929,6 +1017,7 @@ def create_estate_endpoint(
         user=user, kind="estate.create", key=idempotency_key,
         justification=body.justification, estate_id=body.estate_id,
     )
+    clear_response_cache()
     return _envelope(_sanitized_estate(record, None))
 
 
@@ -960,6 +1049,7 @@ def update_estate_endpoint(
         user=user, kind="estate.update", key=idempotency_key,
         justification=body.justification, estate_id=estate_id,
     )
+    clear_response_cache()
     latest = _latest_run(_all_runs(500, estate_id=estate_id))
     return _envelope(_sanitized_estate(record, latest))
 
@@ -1005,6 +1095,7 @@ def disable_estate_endpoint(
         user=user, kind="estate.disable", key=idempotency_key,
         justification=body.justification, estate_id=estate_id,
     )
+    clear_response_cache()
     return _envelope(_sanitized_estate(record, None))
 
 
@@ -1637,6 +1728,79 @@ def _resolve_execution_profile(estate_id: str, requested: str | None) -> str | N
     return requested
 
 
+def _resolve_execution_binding(body: StartRunRequest) -> tuple[str, str, str]:
+    """Resolve and validate the canonical estate/source/pack contract."""
+    from tools.adapters import ADAPTER_TYPES
+    from tools.connection_context import EstateNotFound
+    from tools.pack_loader import adapter_type_for
+
+    if body.pack_id and body.execution_profile and body.pack_id != body.execution_profile:
+        raise HTTPException(
+            status_code=422,
+            detail="pack_id and deprecated execution_profile must match when both are supplied.",
+        )
+    if body.execution_profile and not body.pack_id:
+        # Compatibility validation keeps the former API error contract,
+        # while the value is immediately normalized to canonical pack_id.
+        pack_id = _resolve_execution_profile(body.estate_id, body.execution_profile)
+    elif body.pack_id:
+        pack_id = body.pack_id
+    else:
+        pack_id = _resolve_execution_profile(body.estate_id, None)
+    if not pack_id:
+        raise HTTPException(status_code=422, detail="Select a Migration Pack using pack_id.")
+
+    pack = next((item for item in _packs() if item.get("pack_id") == pack_id), None)
+    if pack is None:
+        raise HTTPException(status_code=422, detail=f"Unknown Migration Pack: {pack_id!r}.")
+    if not pack.get("execution_supported"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Migration Pack {pack_id!r} supports assessment only.",
+        )
+    try:
+        estate = _estate(body.estate_id)
+    except EstateNotFound as exc:
+        raise HTTPException(status_code=422, detail=f"Unknown estate: {body.estate_id!r}.") from exc
+
+    sources = estate.get("sources") or []
+    if body.source_id:
+        candidates = [source for source in sources if source.get("source_id") == body.source_id]
+        if not candidates:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Estate {body.estate_id!r} has no source {body.source_id!r}.",
+            )
+        if not _source_declares_pack(candidates[0], pack_id):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Source {body.source_id!r} is not bound to Migration Pack {pack_id!r}."
+                ),
+            )
+    else:
+        candidates = [source for source in sources if _source_declares_pack(source, pack_id)]
+        if len(candidates) != 1:
+            detail = (
+                f"No source in estate {body.estate_id!r} declares Migration Pack {pack_id!r}."
+                if not candidates
+                else f"Several sources declare Migration Pack {pack_id!r}; select source_id."
+            )
+            raise HTTPException(status_code=422, detail=detail)
+
+    source = candidates[0]
+    wanted_adapter = adapter_type_for(pack)
+    if source.get("adapter") != wanted_adapter or wanted_adapter not in ADAPTER_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Migration Pack {pack_id!r} is incompatible with source "
+                f"{source.get('source_id')!r}."
+            ),
+        )
+    return source["source_id"], pack_id, body.pipeline_id or pack_id
+
+
 @router.post("/runs", response_model=Envelope, status_code=status.HTTP_202_ACCEPTED)
 def start_run(
     body: StartRunRequest,
@@ -1644,7 +1808,7 @@ def start_run(
     user: UserContext = Depends(require_role("operator")),
 ) -> dict:
     authorize_estate(user, body.estate_id, "operator")
-    execution_profile = _resolve_execution_profile(body.estate_id, body.execution_profile)
+    source_id, pack_id, pipeline_id = _resolve_execution_binding(body)
     return _queue(
         user=user,
         kind="migration.start",
@@ -1652,8 +1816,9 @@ def start_run(
         justification=body.justification,
         topic="migration.requested",
         event={
-            "pipeline_id": body.pipeline_id,
-            "execution_profile": execution_profile,
+            "pipeline_id": pipeline_id,
+            "source_id": source_id,
+            "pack_id": pack_id,
             "estate_id": body.estate_id,
             "drop_fraction": 0.0,
         },

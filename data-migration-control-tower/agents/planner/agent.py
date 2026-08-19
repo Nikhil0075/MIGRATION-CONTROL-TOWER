@@ -19,7 +19,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from tools.connection_context import DEFAULT_ESTATE_ID
+from tools.connection_context import DEFAULT_ESTATE_ID, load_estate_document
 from tools.firestore_client import get_client
 from tools.lineage_graph import find_unresolved_dependencies
 from tools.pack_loader import PackNotFound, dialect_note, get_pack, scheduled_tables
@@ -91,6 +91,7 @@ def propose_plan(run_id: str) -> dict:
     estate_id = run.get("estate_id") or DEFAULT_ESTATE_ID
     pack_id = run.get("pack_id") or DEFAULT_PACK_ID
     source_id = run.get("source_id") or DEFAULT_SOURCE_ID
+    estate_target = (load_estate_document(estate_id).get("target") or {})
     try:
         pack = get_pack(pack_id)
     except PackNotFound:
@@ -136,6 +137,7 @@ def propose_plan(run_id: str) -> dict:
         "estate_id": estate_id,
         "source_id": source_id,
         "pack_id": pack_id,
+        "target": estate_target,
         "steps": steps,
         "targets": targets,
         "rollback_strategy": ROLLBACK_STRATEGY,

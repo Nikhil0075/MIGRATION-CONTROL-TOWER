@@ -146,6 +146,52 @@ def test_dag_artifact_adapter_matches_source_catalog_directly():
     assert _without_timestamp(direct, "discovered_at") == _without_timestamp(via_adapter, "discovered_at")
 
 
+def test_registered_estate_discovery_builds_every_declared_binding(monkeypatch):
+    from agents.discovery import agent as discovery
+
+    estate = {
+        "estate_id": "registered-estate",
+        "sources": [
+            {"source_id": "sql-one", "adapter": "sqlserver"},
+            {"source_id": "dag-one", "adapter": "dag_artifacts"},
+        ],
+    }
+    built = []
+
+    class FakeAdapter:
+        def __init__(self, source_id):
+            self.source_id = source_id
+
+        def discover_tables(self):
+            return [{"table_id": self.source_id}] if self.source_id == "sql-one" else []
+
+        def discover_pipelines(self):
+            return [{"pipeline_id": self.source_id}] if self.source_id == "dag-one" else []
+
+        def record_connection_health(self, *_args, **_kwargs):
+            return None
+
+    class Binding:
+        def __init__(self, source_id):
+            self.source_id = source_id
+            self.requires_connection = source_id == "sql-one"
+
+    monkeypatch.setattr("tools.connection_context.load_estate_document", lambda _id: estate)
+    monkeypatch.setattr(
+        "tools.connection_context.binding_from_estate",
+        lambda _estate, source_id: Binding(source_id),
+    )
+    monkeypatch.setattr(
+        "tools.adapters.build_adapter_for_binding",
+        lambda binding: (built.append(binding.source_id), FakeAdapter(binding.source_id))[1],
+    )
+
+    tables, pipelines = discovery.discover_estate(estate_id="registered-estate")
+    assert built == ["sql-one", "dag-one"]
+    assert tables == [{"table_id": "sql-one"}]
+    assert pipelines == [{"pipeline_id": "dag-one"}]
+
+
 @skip_if_no_sql_server
 def test_sqlserver_adapter_contract_shape():
     adapter = SqlServerAdapter()

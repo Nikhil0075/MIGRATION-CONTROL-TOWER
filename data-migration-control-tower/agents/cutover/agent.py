@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 
 from tools.firestore_client import get_client
 from tools.policy_engine import evaluate
 from tools.reconciliation import check_hash, check_row_count
 from tools import approval_service
 from tools.bigquery_tools import get_key_values, get_row_count as bq_row_count
-from tools.sqlserver_client import get_connection
 from tools.wave_manager import within_approval_window
 
 logger = logging.getLogger("cutover_agent")
@@ -142,23 +142,33 @@ def trigger_post_cutover_monitoring(
     is the one-shot proof the cutover data is still intact immediately
     after cutover.
     """
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT COUNT(*) FROM {source_schema}.{source_table}")
-        source_count = cursor.fetchone()[0]
-        cursor.execute(
-            f"SELECT CAST({key_column} AS NVARCHAR(50)) FROM {source_schema}.{source_table} "
-            f"ORDER BY {key_column}"
+    from tools.adapters import build_adapter_for_binding
+    from tools.migration_plan import get_plan, plan_binding, target_for_table_ref
+
+    target = target_for_table_ref(run_id, f"{source_schema}.{source_table}")
+    if target is None:
+        raise ValueError(
+            f"Run {run_id!r} has no planned target for {source_schema}.{source_table}."
         )
-        source_keys = [r[0] for r in cursor.fetchall()]
-    finally:
-        conn.close()
+    adapter = build_adapter_for_binding(plan_binding(run_id))
+    source = adapter.source_facts(target)
 
-    target_count = bq_row_count(target_table)
-    target_keys = get_key_values(target_table, key_column)
+    target_config = get_plan(run_id).get("target") or {}
+    dataset_env = target_config.get("dataset_env")
+    dataset = os.environ.get(dataset_env) if dataset_env else None
+    if dataset:
+        target_count = bq_row_count(target["target_table"], dataset=dataset)
+        target_keys = get_key_values(
+            target["target_table"], target["key_column"], dataset=dataset
+        )
+    else:
+        target_count = bq_row_count(target["target_table"])
+        target_keys = get_key_values(target["target_table"], target["key_column"])
 
-    checks = [check_row_count(source_count, target_count), check_hash(source_keys, target_keys)]
+    checks = [
+        check_row_count(source["row_count"], target_count),
+        check_hash(source["keys"], target_keys),
+    ]
     passed = all(c["status"] == "PASS" for c in checks)
 
     monitoring_record = {

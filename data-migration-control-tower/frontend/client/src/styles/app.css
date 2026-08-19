@@ -187,9 +187,19 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .auth-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: linear-gradient(140deg,#e9e5df,#f9f8f6 56%,#eee9e3); }
-.auth-card { width: min(440px,100%); padding: 32px; background: #fff; border: 1px solid var(--mct-border); border-radius: 6px; box-shadow: 0 18px 50px rgba(40,31,25,.12); }
+.auth-card { width: min(480px,100%); padding: 32px; background: #fff; border: 1px solid var(--mct-border); border-radius: 6px; box-shadow: 0 18px 50px rgba(40,31,25,.12); }
 .auth-card h1 { margin: 8px 0; font-size: 1.8rem; }.auth-card > p:not(.eyebrow):not(.auth-footnote) { color: var(--mct-muted); }
-.auth-action { width: 100%; margin-top: 18px; }.auth-footnote { margin: 18px 0 0; color: var(--mct-muted); font-size: .72rem; }
+.auth-methods { margin-top: 18px; }
+.password-signin { display: grid; gap: 12px; }
+.auth-field { display: grid; gap: 5px; color: var(--mct-ink); font-size: .76rem; font-weight: 600; }
+.auth-field input { width: 100%; min-height: 40px; padding: 8px 10px; color: var(--mct-ink); background: #fff; border: 1px solid var(--mct-border-strong); border-radius: 4px; }
+.auth-field input:disabled { color: var(--mct-muted); background: var(--mct-surface-alt); cursor: wait; }
+.auth-action { width: 100%; margin-top: 2px; min-height: 40px; justify-content: center; }
+.auth-google { background: #fff; border-color: var(--mct-border-strong); }
+.auth-divider { position: relative; height: 25px; display: grid; place-items: center; margin: 7px 0; color: var(--mct-muted); font-size: .7rem; text-transform: uppercase; }
+.auth-divider::before { content: ""; position: absolute; inset: 50% 0 auto; border-top: 1px solid var(--mct-border); }
+.auth-divider span { position: relative; padding: 0 9px; background: #fff; }
+.auth-footnote { margin: 18px 0 0; color: var(--mct-muted); font-size: .72rem; }
 
 .inspector { width: 320px; height: calc(100vh - 48px); overflow: auto; background: #fff; border-left: 1px solid var(--mct-border); }
 .inspector-header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: flex-start; padding: 16px; background: #fff; border-bottom: 1px solid var(--mct-border); }

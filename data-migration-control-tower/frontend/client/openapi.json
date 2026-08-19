@@ -2970,10 +2970,43 @@
       },
       "StartRunRequest": {
         "properties": {
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "pack_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pack Id"
+          },
           "pipeline_id": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 2,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Pipeline Id"
           },
           "execution_profile": {
@@ -3005,7 +3038,6 @@
         },
         "type": "object",
         "required": [
-          "pipeline_id",
           "justification"
         ],
         "title": "StartRunRequest"
