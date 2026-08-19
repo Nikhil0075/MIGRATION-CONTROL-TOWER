@@ -242,10 +242,32 @@ python -c "import sys;sys.path.insert(0,'.');from dotenv import load_dotenv;load
 
 **`404 Resource not found (resource=<topic>)`.** That topic does not exist
 in the project. `infrastructure/gcp_setup.sh` is idempotent — re-run it.
+On Windows, run it as
+
+```bash
+CLOUDSDK_PYTHON="$(which python)" bash infrastructure/gcp_setup.sh
+```
+
+The bundled `bq` launcher looks for an executable literally named
+`python3.13`, which the Windows installer does not create. Without that
+variable `bq` fails, `set -e` aborts, and the script never reaches the
+Pub/Sub steps — so it appears to have run while provisioning nothing.
 This is provisioning drift: the script gains a topic, an already-provisioned
 project never gets it, and the operation record is written while the command
 is silently never published. `tests/test_pubsub_provisioning.py` now fails
 in review instead.
+
+**A consumer keeps failing on the same message.** After 10 delivery
+attempts Pub/Sub forwards it to the `dead-letter` topic and the consumer
+moves on. Read what was dropped:
+
+```bash
+gcloud pubsub subscriptions pull dead-letter-sub --limit=10 --format=json
+```
+
+Each message carries a `CloudPubSubDeadLetterSourceSubscription`
+attribute naming which consumer gave up on it. The console has no
+dead-letter view — this is the only place to look.
 
 **403 on every page.** Your account holds no role. See A1.
 

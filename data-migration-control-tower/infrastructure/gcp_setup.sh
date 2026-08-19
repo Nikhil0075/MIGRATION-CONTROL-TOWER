@@ -11,6 +11,15 @@
 #   gcloud config set account <your-account>
 #   gcloud config set project <your-project-id>
 #   bash infrastructure/gcp_setup.sh
+#
+# Windows gotcha: the bundled `bq` launcher looks for an executable
+# literally named `python3.13`, which the Windows python.org installer
+# does not create — it installs `python.exe`. `bq` then fails with
+#     ERROR: (bq) python3.13: command not found
+# and `set -e` aborts the whole script at the BigQuery step, BEFORE the
+# Pub/Sub dead-lettering below. Export the interpreter first:
+#
+#   CLOUDSDK_PYTHON="$(which python)" bash infrastructure/gcp_setup.sh
 set -euo pipefail
 
 PROJECT_ID="$(gcloud config get-value project 2>/dev/null)"
