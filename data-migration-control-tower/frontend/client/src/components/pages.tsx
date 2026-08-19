@@ -7,6 +7,7 @@ import { Column, EstateSummary, ProgressSnapshot, Role, Session } from "../model
 import { formatValue, statusTone } from "../status";
 import { Icon } from "./icons";
 import { AgentBadge } from "./agents";
+import { OrchestrationMap } from "./orchestration";
 
 type RecordRow = Record<string, any>;
 export type PageProps = {
@@ -545,6 +546,10 @@ function OverviewPage({ onInspect, activeEstateId }: PageProps) {
           </div>
           <Panel title="Latest lifecycle" subtitle="Measured durable milestones; row transfer is reported separately">
             <LifecycleProgress progress={data.runs?.latest?.progress} />
+            {/* The same derivation as the run page, at a glance. /overview
+                already returns the whole latest run document, so this
+                needs no extra request and no new endpoint. */}
+            <OrchestrationMap run={data.runs?.latest} compact />
           </Panel>
           <div class="workspace-grid two-one">
             <Panel
@@ -1146,6 +1151,12 @@ function RunDetailPage(props: PageProps & { runId: string }) {
           </div>
           <Panel title="Lifecycle progress" subtitle="Governance and cutover milestones, not elapsed-time estimation">
             <LifecycleProgress progress={data.run.progress} />
+          </Panel>
+          <Panel
+            title="Agent orchestration"
+            subtitle="Derived from this run's own state history — no stage is inferred or estimated."
+          >
+            <OrchestrationMap run={data.run} />
           </Panel>
           <Panel title="Stage timeline">
             <ol class="stage-timeline">

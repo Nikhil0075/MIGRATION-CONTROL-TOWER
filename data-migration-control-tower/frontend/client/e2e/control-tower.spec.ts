@@ -25,7 +25,23 @@ const fixtureByPath: Record<string, unknown> = {
   "/api/v1/overview": {
     fleet_health: "HEALTHY",
     estate: { objects: 58, pipelines: 4, sources: [{ source_id: "wwi-sqlserver", health: "HEALTHY" }] },
-    runs: { migrated_percent: 100, complete: 1, active: 0, latest: { progress: { percent: 100, status: "complete", label: "Migration complete", current_stage: "COMPLETE", completed_units: 12, total_units: 12, run_id: "run-live", last_observed_at: generatedAt } } },
+    runs: {
+      migrated_percent: 100, complete: 1, active: 0,
+      latest: {
+        run_id: "run-live",
+        // The real /overview returns the whole latest run document, so the
+        // orchestration map reads state and state_history straight off it.
+        // This run recovered from the seeded row-loss defect, which is the
+        // path worth having in a baseline.
+        state: "MONITORING",
+        state_history: [
+          "REQUESTED", "DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED", "MIGRATING",
+          "VALIDATING", "FAILED", "INVESTIGATING", "REMEDIATING", "VALIDATING", "PASSED",
+          "READY_FOR_APPROVAL", "APPROVED", "CUTOVER", "MONITORING",
+        ].map((state, index) => ({ state, at: `2026-08-17T09:${String(index).padStart(2, "0")}:00Z` })),
+        progress: { percent: 100, status: "complete", label: "Migration complete", current_stage: "COMPLETE", completed_units: 12, total_units: 12, run_id: "run-live", last_observed_at: generatedAt },
+      },
+    },
     waves: { queued_operations: 0 },
     policy_denials: 2,
     recovery_rate: 1,
@@ -435,4 +451,23 @@ test("the agent fleet renders one identified card per agent", async ({ page }) =
     (images) => images.filter((img: HTMLImageElement) => !img.complete || img.naturalWidth === 0).length,
   );
   expect(undecoded).toBe(0);
+});
+
+
+test("the orchestration map reports each agent's state from the run's own history", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+
+  const map = page.locator(".orchestration-map");
+  await expect(map).toBeVisible();
+  await expect(map.locator(".orchestration-stage")).toHaveCount(7);
+
+  // The fixture run recovered from the seeded defect and is at MONITORING:
+  // validation PASSED is in its history, so Validation reads complete
+  // rather than failed, and only Cutover is still working.
+  await expect(map.locator(".orchestration-stage.is-failed")).toHaveCount(0);
+  await expect(map.locator(".orchestration-stage.is-active")).toHaveCount(1);
+  await expect(map.locator(".orchestration-stage.is-complete")).toHaveCount(6);
 });

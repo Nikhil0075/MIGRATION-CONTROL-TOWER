@@ -353,3 +353,51 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 .agent-badge-text small { color: var(--mct-muted); font-size: .68rem; line-height: 1.35; }
 .agent-card-meta { display: grid; gap: 4px; justify-items: end; flex: none; }
 .agent-card-meta small { color: var(--mct-muted); font-size: .66rem; white-space: nowrap; }
+
+/* Orchestration map (Day 11 Phase 12).
+   Status is carried by text AND shape AND colour, never colour alone —
+   the same rule .status-dot already follows. */
+.orchestration-map { display: flex; flex-wrap: wrap; gap: 4px 0; list-style: none; margin: 0; padding: 4px 0 2px; }
+.orchestration-stage { position: relative; flex: 1 1 130px; min-width: 118px; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 4px 6px 0; text-align: center; }
+.orchestration-stage::after {
+  content: ""; position: absolute; z-index: 0; top: 26px; left: calc(50% + 26px); right: calc(-50% + 26px);
+  height: 2px; background: var(--mct-border-strong); border-radius: 2px;
+}
+.orchestration-stage:last-child::after { display: none; }
+.orchestration-stage.is-complete::after { background: var(--mct-success); }
+
+.orchestration-node {
+  position: relative; z-index: 1; width: 52px; height: 52px; display: grid; place-items: center;
+  border-radius: 12px; background: var(--mct-surface); border: 2px solid var(--mct-border-strong);
+}
+.orchestration-node img { border-radius: 8px; }
+.orchestration-node-plain { width: 22px; height: 22px; border-radius: 4px; background: var(--mct-neutral); }
+.orchestration-stage.is-complete .orchestration-node { border-color: var(--mct-success); }
+.orchestration-stage.is-active .orchestration-node { border-color: var(--agent-accent, var(--mct-brand-blue)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, var(--mct-brand-blue)) 22%, transparent); }
+.orchestration-stage.is-failed .orchestration-node { border-color: var(--mct-danger); }
+.orchestration-stage.is-retrying .orchestration-node { border-color: var(--mct-warning); border-style: dashed; }
+.orchestration-stage.is-waiting .orchestration-node { opacity: .55; border-style: dashed; }
+
+.orchestration-text { display: grid; gap: 1px; }
+.orchestration-text strong { font-size: .72rem; color: var(--mct-ink); }
+.orchestration-text small { font-size: .64rem; color: var(--mct-muted); }
+.orchestration-stage.is-failed .orchestration-text small { color: var(--mct-danger); font-weight: 650; }
+.orchestration-stage.is-retrying .orchestration-text small { color: var(--mct-warning); font-weight: 650; }
+.orchestration-stage.is-active .orchestration-text small { color: var(--mct-brand-blue); font-weight: 650; }
+
+.orchestration-map.compact .orchestration-stage { flex-basis: 96px; min-width: 84px; }
+.orchestration-map.compact .orchestration-node { width: 38px; height: 38px; border-radius: 9px; }
+.orchestration-map.compact .orchestration-stage::after { top: 19px; left: calc(50% + 20px); right: calc(-50% + 20px); }
+.orchestration-map.compact .orchestration-text small { display: none; }
+
+/* Motion marks a state CHANGE; nothing animates while idle. Honouring
+   prefers-reduced-motion is not decoration here — a permanently pulsing
+   node in an operations console is a distraction at best and a barrier at
+   worst. */
+@keyframes orchestration-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, var(--mct-brand-blue)) 22%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--agent-accent, var(--mct-brand-blue)) 10%, transparent); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .orchestration-stage.is-active .orchestration-node { animation: orchestration-pulse 2.4s ease-in-out infinite; }
+}
