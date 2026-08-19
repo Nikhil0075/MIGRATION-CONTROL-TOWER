@@ -366,3 +366,32 @@ test("the workers panel names the reason when nothing is consuming", async ({ pa
     page.getByText(/CONTROL_TOWER_WORKERS is set to off for this process/),
   ).toBeVisible();
 });
+
+
+test("the brand identity is actually applied, not just present in the CSS", async ({ page }) => {
+  // Deliberately a computed-style assertion rather than a screenshot.
+  //
+  // The snapshot suite CANNOT catch this. Playwright compares pixels with
+  // a perceptual `threshold` (default 0.2, YIQ space), and the old command
+  // bar (#252321) and the brand navy (#0b2545) are both dark enough that
+  // every pixel compares as unchanged — the whole 1440x48 bar can be
+  // repainted and `toHaveScreenshot` still passes. Verified: the stored
+  // baselines kept the old bar colour while the live page rendered navy,
+  // and every snapshot test stayed green.
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+
+  const bar = page.locator(".command-bar");
+  await expect(bar).toHaveCSS("background-color", "rgb(11, 37, 69)");
+
+  // The logo must have actually decoded. A wrong path does not 404 here:
+  // publicPath is "/" and the SPA catch-all answers 200 with index.html,
+  // so a typo renders a broken image with a clean network log.
+  const logo = page.locator("img.brand-mark").first();
+  await expect(logo).toHaveAttribute("src", /^\/assets\/brand\//);
+  expect(
+    await logo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0),
+  ).toBe(true);
+});

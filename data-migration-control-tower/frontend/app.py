@@ -462,9 +462,14 @@ def application_shell(full_path: str) -> FileResponse:
             # emits a few stable loader names, which must be revalidated.
             fingerprinted = bool(re.search(r"[.-][0-9a-f]{8,}[.-]", requested.name, re.IGNORECASE))
             versioned_jet_theme = full_path.startswith("styles/redwood/20.1.3/")
+            # Brand art carries no content hash, so it would otherwise be
+            # revalidated on every page load. The directory itself is
+            # versioned instead: publishing new artwork means /v2/, which
+            # is a new URL, so a stale cache is impossible by construction.
+            versioned_brand = full_path.startswith("assets/brand/v1/")
             cache = (
                 "public, max-age=31536000, immutable"
-                if fingerprinted or versioned_jet_theme
+                if fingerprinted or versioned_jet_theme or versioned_brand
                 else "no-cache"
             )
             return FileResponse(str(requested), headers={"Cache-Control": cache})

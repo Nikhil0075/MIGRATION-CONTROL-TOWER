@@ -69,9 +69,13 @@ export function AuthenticationGate({
   return (
     <main class="auth-page">
       <section class="auth-card" aria-labelledby="auth-title">
-        <div class="brand-mark" aria-hidden="true">
-          M
-        </div>
+        <img
+          class="brand-mark"
+          src="/assets/brand/v1/logo-symbol.png"
+          alt="Migration Control Tower"
+          width="56"
+          height="56"
+        />
         <p class="eyebrow">Autonomous data migration</p>
         <h1 id="auth-title">Migration Control Tower</h1>
         <p>
@@ -172,9 +176,13 @@ export function NoAccessGate({
   return (
     <main class="auth-page">
       <section class="auth-card" aria-labelledby="no-access-title">
-        <div class="brand-mark" aria-hidden="true">
-          M
-        </div>
+        <img
+          class="brand-mark"
+          src="/assets/brand/v1/logo-symbol.png"
+          alt="Migration Control Tower"
+          width="56"
+          height="56"
+        />
         <p class="eyebrow">Signed in</p>
         <h1 id="no-access-title">No access yet</h1>
         <p>

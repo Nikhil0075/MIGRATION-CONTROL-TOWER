@@ -34,3 +34,6 @@ frontend/client/web/
 # and must stay tracked.
 test-results/
 playwright-report/
+
+# Local build proofs from tools/brand_assets.py --check
+build/

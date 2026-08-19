@@ -11,14 +11,25 @@ module.exports = {
     // luck, and a nested one like /estates/new requests
     // /estates/js/main.js, hits the SPA fallback, receives index.html, and
     // the app never boots. It also breaks runtime-loaded lazy chunks on
-    // any nested route. /favicon.svg was already absolute for the same
-    // underlying reason.
+    // any nested route. The favicon links in index.html are absolute for
+    // the same underlying reason.
     config.output = { ...(config.output || {}), publicPath: "/" };
 
     config.resolve = config.resolve || {};
     config.resolve.alias = { ...(config.resolve.alias || {}), chai: false };
     config.plugins = config.plugins || [];
-    config.plugins.push(new CopyPlugin({ patterns: [{ from: "src/favicon.svg", to: "favicon.svg" }] }));
+    // Brand art is copied verbatim rather than imported through the JS
+    // graph, so the filenames stay stable and predictable — the CSP is
+    // `img-src 'self'`, so every one of these must be served from our own
+    // origin, and a stable path is what lets frontend/app.py cache the
+    // versioned directory immutably.
+    config.plugins.push(
+      new CopyPlugin({
+        patterns: [
+          { from: "src/assets", to: "assets" }
+        ]
+      })
+    );
     config.plugins.push(
       new webpack.DefinePlugin({
         __MCT_E2E_BYPASS__: JSON.stringify(process.env.MCT_E2E_BYPASS === "1")

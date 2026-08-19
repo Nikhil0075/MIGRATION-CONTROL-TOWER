@@ -475,9 +475,14 @@ export const App = registerCustomElement("app-root", (_props: Props) => {
           onClick={() => navigate("overview")}
           aria-label="Migration Control Tower overview"
         >
-          <span class="brand-mark small" aria-hidden="true">
-            M
-          </span>
+          <img
+            class="brand-mark small"
+            src="/assets/brand/v1/logo-symbol-reversed.png"
+            alt=""
+            aria-hidden="true"
+            width="28"
+            height="28"
+          />
           <span>Migration Control Tower</span>
         </button>
         <div class="command-context" aria-label="Current operating context">
