@@ -423,3 +423,9 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
   .auth-shell { grid-template-columns: minmax(380px, 480px) 1fr; }
   .auth-art { display: block; }
 }
+
+/* Shared empty state. Illustration optional, text never. */
+.empty-state { display: grid; justify-items: center; gap: 6px; padding: 26px 20px; text-align: center; color: var(--mct-muted); }
+.empty-state-art { width: 96px; height: 96px; opacity: .85; margin-bottom: 2px; }
+.empty-state strong { color: var(--mct-ink); font-size: .82rem; }
+.empty-state p { margin: 0; max-width: 52ch; font-size: .73rem; line-height: 1.5; }

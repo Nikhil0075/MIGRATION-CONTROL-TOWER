@@ -25,6 +25,7 @@ import {
   PageHeader,
   PageProps,
   PageState,
+  EmptyState,
   Panel,
   estatePath,
   useResource,
@@ -72,10 +73,11 @@ export function IncidentsPage(props: PageProps) {
             subtitle="Root cause is the canonical fact, not the display-wrapped recall narrative."
           >
             {!(data.incidents || []).length ? (
-              <p class="empty-state">
-                No incidents recorded. One is opened only when validation fails, so an
-                empty list is the healthy state.
-              </p>
+              <EmptyState
+                kind="no-incidents"
+                title="No incidents recorded"
+                detail="One is opened only when validation fails, so an empty list is the healthy state."
+              />
             ) : (
               <DataTable
                 label="Incidents"
@@ -100,7 +102,7 @@ export function IncidentsPage(props: PageProps) {
             subtitle="policy_engine.py takes no free-text estate content, so a table comment cannot influence these."
           >
             {!(data.policy_denials || []).length ? (
-              <p class="empty-state">No policy denials in this window.</p>
+              <EmptyState kind="no-policy-violations" title="No policy denials in this window" />
             ) : (
               <DataTable
                 label="Policy denials"
@@ -159,11 +161,11 @@ export function DeadLettersPage(props: PageProps) {
             subtitle="Opening this page does not consume them — each lease is handed straight back."
           >
             {!pending.length ? (
-              <p class="empty-state">
-                No dead letters are visible right now. This is a read of a live queue,
-                not a count: a message already held by another reader does not appear
-                here, so an empty list is not by itself proof that nothing failed.
-              </p>
+              <EmptyState
+                kind="no-dead-letters"
+                title="No dead letters visible right now"
+                detail="This is a read of a live queue, not a count: a message already held by another reader does not appear here, so an empty list is not by itself proof that nothing failed."
+              />
             ) : (
               <>
                 <DataTable
@@ -225,7 +227,7 @@ export function DeadLettersPage(props: PageProps) {
 
           <Panel title="Replayed and archived" subtitle="Durable record of every action taken here.">
             {!(data.archive || []).length ? (
-              <p class="empty-state">Nothing has been replayed or archived yet.</p>
+              <EmptyState kind="no-dead-letters" title="Nothing has been replayed or archived yet" />
             ) : (
               <DataTable
                 label="Dead letter archive"
@@ -281,10 +283,11 @@ export function MemoryBankPage(props: PageProps) {
             subtitle="Exact-match recall on a normalized signature — not semantic similarity, which this project has no embedding infrastructure to do honestly."
           >
             {!facts.length ? (
-              <p class="empty-state">
-                Nothing learned yet. A fact is written only after an incident is
-                confirmed resolved, so this fills up as runs recover from real defects.
-              </p>
+              <EmptyState
+                kind="no-memory"
+                title="Nothing learned yet"
+                detail="A fact is written only after an incident is confirmed resolved, so this fills up as runs recover from real defects."
+              />
             ) : (
               <DataTable
                 label="Memory Bank facts"
@@ -407,7 +410,7 @@ export function ApprovalsPage(props: PageProps) {
             subtitle="Approve from the run page; this inbox shows what to weigh before doing so."
           >
             {!awaiting.length ? (
-              <p class="empty-state">Nothing is waiting for approval.</p>
+              <EmptyState kind="no-approvals" title="Nothing is waiting for approval" />
             ) : (
               <DataTable
                 label="Awaiting approval"
@@ -420,7 +423,7 @@ export function ApprovalsPage(props: PageProps) {
 
           <Panel title="Decided" subtitle="Append-only history; an approval is never overwritten.">
             {!decided.length ? (
-              <p class="empty-state">No approvals have been decided yet.</p>
+              <EmptyState kind="no-approvals" title="No approvals have been decided yet" />
             ) : (
               <DataTable
                 label="Decided approvals"

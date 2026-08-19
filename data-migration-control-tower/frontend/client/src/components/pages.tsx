@@ -102,6 +102,68 @@ export function useResource<T = any>(path: string, refreshKey = 0) {
   return { data, error, loading, generatedAt };
 }
 
+/** Illustrations for the states that mean "nothing here". */
+const EMPTY_ART = "/assets/brand/v1/empty";
+
+export type EmptyKind =
+  | "no-runs"
+  | "no-incidents"
+  | "no-approvals"
+  | "no-policy-violations"
+  | "no-dead-letters"
+  | "no-memory"
+  | "estate-onboarded"
+  | "migration-complete";
+
+export function EmptyState({
+  kind,
+  title,
+  detail,
+  children,
+}: {
+  kind?: EmptyKind;
+  title: string;
+  detail?: string;
+  children?: any;
+}) {
+  // One component, because five near-identical versions of this had grown
+  // in five files and each said "nothing here" slightly differently.
+  //
+  // The illustration is decorative: `title` already carries the meaning,
+  // so announcing the picture too would just repeat it for a screen
+  // reader. An empty state that only shows a drawing is a worse empty
+  // state, so the text is required and the art is not.
+  return (
+    <div class="empty-state">
+      {kind && (
+        <img
+          class="empty-state-art"
+          src={`${EMPTY_ART}/${kind}.png`}
+          alt=""
+          aria-hidden="true"
+          width="96"
+          height="96"
+          loading="lazy"
+        />
+      )}
+      <strong>{title}</strong>
+      {detail && <p>{detail}</p>}
+      {children}
+    </div>
+  );
+}
+
+export function LoadingState({ message }: { message?: string }) {
+  // Says what is being waited for. "Loading…" tells an operator nothing;
+  // naming the work turns a wait into progress they can reason about.
+  return (
+    <div class="page-state">
+      <ProgressBar value={-1} aria-label={message || "Loading operational data"} />
+      <span>{message || "Loading operational data…"}</span>
+    </div>
+  );
+}
+
 export function PageState({
   loading,
   error,
@@ -109,13 +171,7 @@ export function PageState({
   loading: boolean;
   error: string | null;
 }) {
-  if (loading)
-    return (
-      <div class="page-state">
-        <ProgressBar value={-1} aria-label="Loading operational data" />
-        <span>Loading operational data…</span>
-      </div>
-    );
+  if (loading) return <LoadingState />;
   if (error)
     return (
       <div class="page-state page-error">
@@ -1600,10 +1656,9 @@ function EvaluationsPage(props: PageProps) {
                 />
               </div>
             ) : (
-              <div class="empty-state">
+              <EmptyState title="Scale report not configured" detail={state.data.scale_report_reason}>
                 <StatusPill value="NOT_CONFIGURED" />
-                <p>{state.data.scale_report_reason}</p>
-              </div>
+              </EmptyState>
             )}
           </Panel>
         </div>
@@ -1805,12 +1860,7 @@ export function PageRouter(props: PageProps) {
   if (root === "estates" && segments[1] === "new")
     return (
       <Suspense
-        fallback={
-          <div class="page-state">
-            <ProgressBar value={-1} aria-label="Loading onboarding" />
-            Loading onboarding…
-          </div>
-        }
+        fallback={<LoadingState message="Preparing the onboarding wizard…" />}
       >
         <LazyEstateWizard {...props} />
       </Suspense>
@@ -1822,12 +1872,7 @@ export function PageRouter(props: PageProps) {
   if (root === "lineage")
     return (
       <Suspense
-        fallback={
-          <div class="page-state">
-            <ProgressBar value={-1} aria-label="Loading lineage module" />
-            Loading lineage module…
-          </div>
-        }
+        fallback={<LoadingState message="Building the dependency graph…" />}
       >
         <LazyLineagePage {...props} />
       </Suspense>
@@ -1838,37 +1883,32 @@ export function PageRouter(props: PageProps) {
   if (root === "evaluations")
     return (
       <Suspense
-        fallback={
-          <div class="page-state">
-            <ProgressBar value={-1} aria-label="Loading evaluations module" />
-            Loading evaluation module…
-          </div>
-        }
+        fallback={<LoadingState message="Loading scenario and scale results…" />}
       >
         <LazyEvaluationsPage {...props} />
       </Suspense>
     );
   if (root === "incidents")
     return (
-      <Suspense fallback={<PageState loading error={null} />}>
+      <Suspense fallback={<LoadingState message="Gathering incidents and root causes…" />}>
         <LazyIncidentsPage {...props} />
       </Suspense>
     );
   if (root === "dead-letters")
     return (
-      <Suspense fallback={<PageState loading error={null} />}>
+      <Suspense fallback={<LoadingState message="Reading the dead-letter queue…" />}>
         <LazyDeadLettersPage {...props} />
       </Suspense>
     );
   if (root === "memory")
     return (
-      <Suspense fallback={<PageState loading error={null} />}>
+      <Suspense fallback={<LoadingState message="Recalling learned remediations…" />}>
         <LazyMemoryBankPage {...props} />
       </Suspense>
     );
   if (root === "approvals")
     return (
-      <Suspense fallback={<PageState loading error={null} />}>
+      <Suspense fallback={<LoadingState message="Checking approvals and plan bindings…" />}>
         <LazyApprovalsPage {...props} />
       </Suspense>
     );

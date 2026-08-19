@@ -77,6 +77,11 @@ describe("shipped image assets", () => {
       // downloads before they can even sign in.
       "architecture-hero.jpg": 300,
     };
+    // Empty-state art is small line work; a budget per file catches a
+    // full-resolution slice being dropped in by mistake.
+    for (const name of readdirSync(join(BRAND_DIR, "empty"))) {
+      budgetKb[join("empty", name)] = 40;
+    }
     const oversized = Object.entries(budgetKb)
       .map(([name, limit]) => ({ name, kb: statSync(join(BRAND_DIR, name)).size / 1024, limit }))
       .filter(({ kb, limit }) => kb > limit)

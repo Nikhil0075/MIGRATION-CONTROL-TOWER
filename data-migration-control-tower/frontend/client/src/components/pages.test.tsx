@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
 import { h } from "preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import { LifecycleProgress, PageRouter, StatusPill } from "./pages";
+import { EmptyState, LifecycleProgress, LoadingState, PageRouter, StatusPill } from "./pages";
 import { formatValue, statusTone } from "../status";
 
 vi.mock("../api", () => ({
@@ -405,5 +405,47 @@ describe("agent fleet cards", () => {
     await screen.findByText("Discovery");
     // Planner is DRAFT only — it is a real registry state, not a fleet member.
     expect(screen.queryByText("Planner")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared empty and loading states
+// ---------------------------------------------------------------------------
+
+describe("empty states", () => {
+  it("always carries text, so the meaning never lives only in a picture", () => {
+    render(<EmptyState kind="no-runs" title="No migrations yet" />);
+    expect(screen.getByText("No migrations yet")).toBeTruthy();
+  });
+
+  it("treats the illustration as decorative", () => {
+    // The title already says what is going on; announcing the drawing too
+    // would just repeat it for a screen reader.
+    const { container } = render(<EmptyState kind="no-incidents" title="No incidents" />);
+    const art = container.querySelector(".empty-state-art") as HTMLImageElement;
+    expect(art.getAttribute("alt")).toBe("");
+    expect(art.getAttribute("aria-hidden")).toBe("true");
+    expect(art.getAttribute("src")).toMatch(/^\/assets\/brand\/v1\/empty\//);
+  });
+
+  it("works with no illustration at all", () => {
+    // Not every empty state has art, and the component must not require it.
+    const { container } = render(<EmptyState title="Scale report not configured" />);
+    expect(container.querySelector(".empty-state-art")).toBeNull();
+    expect(screen.getByText("Scale report not configured")).toBeTruthy();
+  });
+});
+
+describe("loading states", () => {
+  it("names the work being waited for", () => {
+    // "Loading…" tells an operator nothing. Naming the work turns a wait
+    // into progress they can reason about.
+    render(<LoadingState message="Building the dependency graph…" />);
+    expect(screen.getByText("Building the dependency graph…")).toBeTruthy();
+  });
+
+  it("falls back to a generic message rather than an empty label", () => {
+    render(<LoadingState />);
+    expect(screen.getByText(/Loading operational data/)).toBeTruthy();
   });
 });

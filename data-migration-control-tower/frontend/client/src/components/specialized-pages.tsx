@@ -3,6 +3,7 @@ import { useState } from "preact/hooks";
 import { Icon } from "./icons";
 import {
   DataTable,
+  EmptyState,
   MetricCard,
   PageHeader,
   PageProps,
@@ -151,10 +152,9 @@ export function EvaluationsPage(props: PageProps) {
                 />
               </div>
             ) : (
-              <div class="empty-state">
+              <EmptyState title="Scale report not configured" detail={state.data.scale_report_reason}>
                 <StatusPill value="NOT_CONFIGURED" />
-                <p>{state.data.scale_report_reason}</p>
-              </div>
+              </EmptyState>
             )}
           </Panel>
         </div>

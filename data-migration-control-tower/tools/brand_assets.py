@@ -213,7 +213,38 @@ def _bands(filled: list[bool], min_run: int) -> list[tuple[int, int]]:
     return bands
 
 
-def slice_contact_sheet(master_path: Path, names: list[str], out_dir: Path, size: int = 256) -> list[Path]:
+def _drop_caption_band(tile: Image.Image) -> Image.Image:
+    """Remove a caption the model added despite being told not to.
+
+    These models render text into illustrations reliably enough that
+    forbidding it in the prompt is not a control. Rather than regenerate
+    and hope, the caption is cut structurally: within a cell the artwork
+    and its label are separated by clear whitespace, so the LAST row band
+    is the caption when it begins in the bottom third. Bands are used
+    rather than a fixed fraction because several of these illustrations
+    have their own internal gaps — a tick above a database, a flag above a
+    path — which a blind bottom-crop would slice through.
+    """
+    alpha = tile.getchannel("A")
+    height = tile.height
+    filled = [alpha.crop((0, y, tile.width, y + 1)).getbbox() is not None for y in range(height)]
+    bands = _bands(filled, min_run=2)
+    if len(bands) < 2:
+        return tile
+    last_start, _last_end = bands[-1]
+    if last_start / height < 0.62:
+        return tile  # not a caption, just artwork with a gap in it
+    return tile.crop((0, 0, tile.width, bands[-2][1]))
+
+
+def slice_contact_sheet(
+    master_path: Path,
+    names: list[str],
+    out_dir: Path,
+    size: int = 256,
+    background_floor: int | None = None,
+    drop_captions: bool = False,
+) -> list[Path]:
     """Cut a grid of icon tiles out of one generated sheet.
 
     Generating seven icons as seven jobs produces seven STYLES: the model
@@ -229,7 +260,17 @@ def slice_contact_sheet(master_path: Path, names: list[str], out_dir: Path, size
     cells (the sheet is asked for one empty cell to make the count
     obvious) are ignored.
     """
-    keyed = key_white_to_alpha(Image.open(master_path))
+    global BACKGROUND_FLOOR
+    previous_floor = BACKGROUND_FLOOR
+    if background_floor is not None:
+        # A higher floor discards the pale cell borders some sheets draw.
+        # Left in place they become "content", every cell's bounding box
+        # becomes the border rectangle, and band detection finds nothing.
+        BACKGROUND_FLOOR = background_floor
+    try:
+        keyed = key_white_to_alpha(Image.open(master_path))
+    finally:
+        BACKGROUND_FLOOR = previous_floor
     alpha = keyed.getchannel("A")
     width, height = keyed.size
 
@@ -238,11 +279,27 @@ def slice_contact_sheet(master_path: Path, names: list[str], out_dir: Path, size
     if not rows:
         raise ValueError("no icon rows found — is this a contact sheet?")
 
+    # Columns are projected across the WHOLE sheet, not per row.
+    #
+    # Per row, any illustration with internal horizontal gaps splits into
+    # several "columns" and every later name shifts onto the wrong art. It
+    # happened: a cell showing three separate database cylinders became
+    # three cells, and the last two icons in the set were mis-assigned.
+    # Projected full-height, that gap is covered by whatever occupies the
+    # same x-range in another row, so a regular grid stays a regular grid.
+    col_filled = [alpha.crop((x, 0, x + 1, height)).getbbox() is not None for x in range(width)]
+    columns = _bands(col_filled, min_run=width // 30)
+    if not columns:
+        raise ValueError("no icon columns found — is this a contact sheet?")
+
     cells: list[tuple[int, int, int, int]] = []
     for top, bottom in rows:
-        strip = alpha.crop((0, top, width, bottom))
-        col_filled = [strip.crop((x, 0, x + 1, bottom - top)).getbbox() is not None for x in range(width)]
-        for left, right in _bands(col_filled, min_run=width // 30):
+        for left, right in columns:
+            # An empty cell (sheets are asked for one, to make the count
+            # obvious) contributes nothing and is skipped rather than
+            # consuming a name.
+            if alpha.crop((left, top, right, bottom)).getbbox() is None:
+                continue
             cells.append((left, top, right, bottom))
 
     if len(cells) < len(names):
@@ -252,6 +309,8 @@ def slice_contact_sheet(master_path: Path, names: list[str], out_dir: Path, size
     written: list[Path] = []
     for name, box in zip(names, cells):
         tile = trim(keyed.crop(box))
+        if drop_captions:
+            tile = trim(_drop_caption_band(tile))
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         art = tile.copy()
         art.thumbnail((size, size), Image.LANCZOS)
@@ -286,6 +345,10 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--check", action="store_true", help="also write composite proofs")
     parser.add_argument("--hero", action="store_true", help="prepare a full-bleed hero panel")
+    parser.add_argument("--background-floor", type=int, default=None,
+                        help="coverage below which a pixel is background (raise to drop pale cell borders)")
+    parser.add_argument("--drop-captions", action="store_true",
+                        help="cut a caption the model added under each cell")
     parser.add_argument(
         "--slice-icons",
         help="comma-separated names; treats the master as a contact sheet and cuts one tile per name",
@@ -299,7 +362,13 @@ def main() -> None:
         produced = build_hero(args.master, args.out)
     elif args.slice_icons:
         names = [n.strip() for n in args.slice_icons.split(",") if n.strip()]
-        produced = slice_contact_sheet(args.master, names, args.out)
+        produced = slice_contact_sheet(
+            args.master,
+            names,
+            args.out,
+            background_floor=args.background_floor,
+            drop_captions=args.drop_captions,
+        )
     else:
         produced = build(args.master, args.out, args.check)
 
