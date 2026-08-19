@@ -189,6 +189,21 @@ unavailable, malformed response) — this is intentional, not a bug:
   dashboard's "active run" — both have happened for real during
   development. Follow the `registered`/`temp_run` fixture patterns in
   `tests/test_registry.py` / `tests/test_state_machine.py`.
+- **The shared demo estate is borrowed, never owned**: `wwi-demo-estate`
+  is the estate the console defaults to and every caller that omits an
+  `estate_id` resolves to, so it cannot be deleted in teardown the way a
+  test-created estate can — it has to be *restored*. A test that writes to
+  it and walks away leaves that state for every later test and every later
+  run, and the resulting failure is delayed and self-erasing:
+  `import_from_yaml` refuses to overwrite an estate whose `origin` is
+  `wizard` (deliberately — see
+  `test_yaml_import_refuses_to_revert_a_console_edit`), so an inherited
+  console-authored estate makes
+  `test_importing_the_committed_demo_estate_is_idempotent` fail for a
+  reason that has nothing to do with idempotency. Use the
+  `borrowed_demo_estate` fixture in `tests/test_estate_registry.py`: it
+  states the precondition it needs out loud, and puts the document and its
+  revisions back exactly as it found them.
 - **ADK agent names must be valid Python identifiers** — no hyphens.
   `AGENT_ID` (e.g. `"risk-agent"`) is the display/registry identity;
   pass `AGENT_ID.replace("-", "_")` as the ADK `Agent(name=...)`.

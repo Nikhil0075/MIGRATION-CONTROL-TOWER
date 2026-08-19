@@ -83,6 +83,50 @@ def temp_estate():
             pass
 
 
+@pytest.fixture
+def borrowed_demo_estate():
+    """Borrows the shared demo estate: states its precondition, puts it back.
+
+    `wwi-demo-estate` is the one estate this file touches that is not
+    disposable — the console's default switcher entry, the packs and every
+    caller that omits an estate_id all point at it. So the hygiene rule the
+    rest of this file follows for temp estates ("delete what you created")
+    becomes "restore exactly what you borrowed", snapshot and all.
+
+    The precondition half matters just as much. `import_from_yaml` refuses
+    to overwrite an estate whose origin is `wizard`, deliberately — that is
+    what `test_yaml_import_refuses_to_revert_a_console_edit` pins down. A
+    test that just calls `import_from_yaml(DEMO_YAML)` therefore inherits
+    whatever the last writer left on the shared document: if anything (a
+    test, or an operator using the console against this project) leaves it
+    console-authored, the import correctly refuses and the test fails for a
+    reason that has nothing to do with idempotency. Establishing the state
+    out loud means a failure afterwards is this test's own defect.
+
+    `force=True` re-imports the content but deliberately does *not* re-stamp
+    `origin` — `update_estate` preserves provenance — so the origin the
+    importer keys on is set here explicitly rather than as a side effect.
+    """
+    from tools.firestore_client import get_client
+
+    doc_ref = get_client().collection("estates").document(DEFAULT_ESTATE_ID)
+    snapshot = doc_ref.get().to_dict()
+    revisions_before = {r.id for r in doc_ref.collection("revisions").stream()}
+
+    import_from_yaml(DEMO_YAML, actor="test-precondition", force=True)
+    doc_ref.update({"origin": ORIGIN_YAML})
+
+    yield
+
+    for revision in doc_ref.collection("revisions").stream():
+        if revision.id not in revisions_before:
+            revision.reference.delete()
+    if snapshot is None:
+        doc_ref.delete()
+    else:
+        doc_ref.set(snapshot)
+
+
 # ---------------------------------------------------------------------------
 # Validation — no Firestore needed
 # ---------------------------------------------------------------------------
@@ -234,7 +278,7 @@ def test_get_source_names_what_is_declared(temp_estate):
 
 
 @pytest.mark.requires_firestore
-def test_importing_the_committed_demo_estate_is_idempotent():
+def test_importing_the_committed_demo_estate_is_idempotent(borrowed_demo_estate):
     first = import_from_yaml(DEMO_YAML, actor="test")
     second = import_from_yaml(DEMO_YAML, actor="test")
     assert first["estate_id"] == DEFAULT_ESTATE_ID
