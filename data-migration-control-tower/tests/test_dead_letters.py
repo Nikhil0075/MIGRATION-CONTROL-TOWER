@@ -462,3 +462,119 @@ def test_memory_bank_leads_with_the_most_reused_fact(client, monkeypatch):
 
 def test_memory_bank_requires_authentication(client):
     assert client.get("/api/v1/memory-bank").status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Approval evidence
+# ---------------------------------------------------------------------------
+
+
+def _approval_fixture(monkeypatch, *, approved_hash, current_hash, approved_at=None):
+    """Wires the approvals endpoint against controlled subcollections."""
+    from frontend import api_v1
+
+    monkeypatch.setattr(
+        api_v1,
+        "_all_runs",
+        lambda limit, estate_id=None: [
+            {"run_id": "run-1", "estate_id": "wwi-demo-estate", "state": "READY_FOR_APPROVAL"}
+        ],
+    )
+
+    def groups(name, run_ids=None):
+        return {
+            "approval": {
+                "run-1": [
+                    {
+                        "_id": "current",
+                        "status": "APPROVED" if approved_at else "PENDING",
+                        "plan_hash": approved_hash,
+                        "requested_by": "cutover-agent",
+                        "requested_at": "2026-08-18T10:00:00+00:00",
+                        "approved_by": "approver@example.internal" if approved_at else None,
+                        "approved_at": approved_at,
+                        "expires_after_days": 30,
+                    }
+                ]
+            },
+            "migration_plan": {"run-1": [{"_id": "current", "plan_hash": current_hash}]},
+            "reconciliation": {"run-1": [{"status": "PASSED"}, {"status": "FAILED"}]},
+            "risk_findings": {"run-1": [{"severity": "CRITICAL"}, {"severity": "LOW"}]},
+        }.get(name, {})
+
+    monkeypatch.setattr(api_v1, "_subcollection_group", groups)
+    monkeypatch.setattr(api_v1, "_cached", lambda key, build: build())
+
+
+def test_an_approval_bound_to_the_current_plan_reads_as_intact(client, monkeypatch):
+    _token(monkeypatch, {"estate_roles": {"*": ["viewer"]}})
+    _approval_fixture(monkeypatch, approved_hash="abc123", current_hash="abc123")
+
+    body = client.get("/api/v1/approvals", headers=HEADERS).json()["data"]
+
+    assert body["awaiting"][0]["binding"] == "intact"
+    assert body["stale_bindings"] == 0
+
+
+def test_a_plan_changed_after_approval_is_visible_before_cutover(client, monkeypatch):
+    """The whole point of the screen.
+
+    approval_service.consume() already refuses this cutover — but it does
+    so at cutover time, long after a human clicked approve. Surfacing the
+    mismatch up front is the difference between a caught mistake and a
+    surprise.
+    """
+    _token(monkeypatch, {"estate_roles": {"*": ["viewer"]}})
+    _approval_fixture(monkeypatch, approved_hash="abc123", current_hash="def456")
+
+    body = client.get("/api/v1/approvals", headers=HEADERS).json()["data"]
+
+    assert body["awaiting"][0]["binding"] == "stale"
+    assert body["stale_bindings"] == 1
+
+
+def test_no_plan_yet_is_not_reported_as_a_mismatch(client, monkeypatch):
+    """Absent and different are not the same thing. Calling a run with no
+    plan "stale" would send an approver hunting for a change that never
+    happened."""
+    _token(monkeypatch, {"estate_roles": {"*": ["viewer"]}})
+    _approval_fixture(monkeypatch, approved_hash="abc123", current_hash=None)
+
+    body = client.get("/api/v1/approvals", headers=HEADERS).json()["data"]
+
+    assert body["awaiting"][0]["binding"] == "no_plan"
+    assert body["stale_bindings"] == 0
+
+
+def test_evidence_counts_come_from_the_run_not_from_a_summary_field(client, monkeypatch):
+    _token(monkeypatch, {"estate_roles": {"*": ["viewer"]}})
+    _approval_fixture(monkeypatch, approved_hash="abc123", current_hash="abc123")
+
+    item = client.get("/api/v1/approvals", headers=HEADERS).json()["data"]["awaiting"][0]
+
+    assert item["checks_total"] == 2 and item["checks_failed"] == 1
+    assert item["risk_findings"] == 2 and item["critical_findings"] == 1
+
+
+def test_an_expired_approval_is_marked_expired(client, monkeypatch):
+    _token(monkeypatch, {"estate_roles": {"*": ["viewer"]}})
+    _approval_fixture(
+        monkeypatch, approved_hash="abc", current_hash="abc", approved_at="2020-01-01T00:00:00+00:00"
+    )
+
+    item = client.get("/api/v1/approvals", headers=HEADERS).json()["data"]["decided"][0]
+
+    assert item["expired"] is True
+    assert item["expires_at"].startswith("2020-01-31")
+
+
+def test_the_approvals_endpoint_cannot_approve_anything():
+    """A read endpoint that could change state would defeat the separation
+    the whole approval service exists to enforce."""
+    import inspect
+
+    from frontend import api_v1
+
+    source = inspect.getsource(api_v1.approvals)
+    for forbidden in ("approval_service.approve", "transition_state", ".set(", ".update("):
+        assert forbidden not in source, f"the approvals view must not mutate: found {forbidden!r}"

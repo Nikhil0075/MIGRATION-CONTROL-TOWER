@@ -2232,3 +2232,117 @@ def memory_bank_facts(user: UserContext = Depends(get_user_context)) -> dict:
         },
         total=len(facts),
     )
+
+
+@router.get("/approvals", response_model=Envelope)
+def approvals(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    """The cutover approval inbox, with the evidence behind each decision.
+
+    The point of this endpoint is one fact that was previously invisible
+    until it was too late to matter: an approval token is bound to the
+    plan hash it was issued against, and `approval_service.consume()`
+    refuses the cutover if the plan has changed since. That refusal
+    happened at cutover time, long after the human clicked approve. Here
+    the binding is compared up front, so a stale approval is visible
+    BEFORE anyone relies on it.
+
+    Nothing here can approve anything. The only path from
+    READY_FOR_APPROVAL to APPROVED remains the authenticated approver
+    endpoint, which is a separate identity from every agent.
+    """
+    _authorize_read(user, estate_id)
+
+    def _build() -> dict:
+        runs = _all_runs(100, estate_id=estate_id)
+        by_id = {run["run_id"]: run for run in runs}
+        run_ids = set(by_id)
+
+        approval_docs = _subcollection_group("approval", run_ids)
+        plan_docs = _subcollection_group("migration_plan", run_ids)
+        reconciliation = _subcollection_group("reconciliation", run_ids)
+        risk_findings = _subcollection_group("risk_findings", run_ids)
+
+        items = []
+        for run_id, run in by_id.items():
+            approval = next(
+                (doc for doc in approval_docs.get(run_id, []) if doc.get("_id") == "current"), None
+            )
+            if approval is None:
+                continue
+
+            plan = next(
+                (doc for doc in plan_docs.get(run_id, []) if doc.get("_id") == "current"), None
+            ) or {}
+            current_plan_hash = plan.get("plan_hash")
+            approved_plan_hash = approval.get("plan_hash")
+
+            checks = reconciliation.get(run_id, [])
+            failed_checks = [c for c in checks if str(c.get("status", "")).upper() not in {"PASSED", "OK"}]
+            findings = risk_findings.get(run_id, [])
+
+            approved_at = approval.get("approved_at")
+            expires_after_days = approval.get("expires_after_days")
+            expires_at = None
+            expired = False
+            if approved_at and expires_after_days:
+                try:
+                    expires = dt.datetime.fromisoformat(approved_at) + dt.timedelta(
+                        days=int(expires_after_days)
+                    )
+                    expires_at = expires.isoformat()
+                    expired = expires < dt.datetime.now(dt.timezone.utc)
+                except (TypeError, ValueError):
+                    expires_at = None
+
+            items.append(
+                {
+                    "run_id": run_id,
+                    "estate_id": run.get("estate_id"),
+                    "run_state": run.get("state"),
+                    "status": approval.get("status"),
+                    "requested_by": approval.get("requested_by"),
+                    "requested_at": approval.get("requested_at"),
+                    "approved_by": approval.get("approved_by"),
+                    "approved_at": approval.get("approved_at"),
+                    "justification": approval.get("justification"),
+                    "token_id": approval.get("token_id"),
+                    # The binding, stated rather than implied. None for
+                    # current_plan_hash means no plan is recorded yet, which
+                    # is different from a mismatch and must not read as one.
+                    "approved_plan_hash": approved_plan_hash,
+                    "current_plan_hash": current_plan_hash,
+                    "binding": (
+                        "intact"
+                        if approved_plan_hash and approved_plan_hash == current_plan_hash
+                        else "no_plan"
+                        if not current_plan_hash
+                        else "stale"
+                    ),
+                    "expires_at": expires_at,
+                    "expired": expired,
+                    # Evidence an approver should see before deciding.
+                    "checks_total": len(checks),
+                    "checks_failed": len(failed_checks),
+                    "risk_findings": len(findings),
+                    "critical_findings": sum(
+                        1 for f in findings if str(f.get("severity", "")).upper() == "CRITICAL"
+                    ),
+                    "route": f"/runs/{run_id}",
+                }
+            )
+
+        items.sort(key=lambda item: item.get("requested_at") or "", reverse=True)
+        awaiting = [item for item in items if item["status"] == "PENDING"]
+        return _envelope(
+            {
+                "awaiting": awaiting,
+                "decided": [item for item in items if item["status"] != "PENDING"],
+                "stale_bindings": sum(1 for item in items if item["binding"] == "stale"),
+            },
+            total=len(items),
+        )
+
+    return _cached(f"approvals:{estate_id}", _build)

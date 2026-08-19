@@ -111,6 +111,12 @@ const NAVIGATION: NavItem[] = [
     description: "Confirmed remediations reused across runs",
   },
   {
+    route: "approvals",
+    label: "Approvals",
+    icon: "approvals",
+    description: "The human gate, plan binding, and expiry",
+  },
+  {
     route: "system-health",
     label: "System Health",
     icon: "health",

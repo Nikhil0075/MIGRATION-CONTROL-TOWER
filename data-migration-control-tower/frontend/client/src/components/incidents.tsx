@@ -331,3 +331,124 @@ export function MemoryBankPage(props: PageProps) {
     </>
   );
 }
+
+/** Human-readable statement of the plan-hash binding. */
+const BINDING_NOTE: Record<string, string> = {
+  intact: "Bound to the current plan — cutover will be accepted.",
+  stale: "The plan changed after approval. Cutover will be REFUSED until re-approved.",
+  no_plan: "No migration plan recorded yet, so there is nothing to bind to.",
+};
+
+export function ApprovalsPage(props: PageProps) {
+  const [refresh, setRefresh] = useState(0);
+  const state = useResource<Row>(estatePath("/api/v1/approvals", props.activeEstateId), refresh);
+  const data = state.data as any;
+  const awaiting: Row[] = data?.awaiting || [];
+  const decided: Row[] = data?.decided || [];
+
+  const columns = [
+    { key: "run_id", label: "Run" },
+    { key: "status", label: "Status", status: true },
+    {
+      key: "binding",
+      label: "Plan binding",
+      // The fact this page exists for. A token is issued against a plan
+      // hash and consume() refuses the cutover if the plan has moved on —
+      // previously discovered at cutover time, long after someone clicked
+      // approve.
+      value: (row: Row) => BINDING_NOTE[String(row.binding)] || row.binding,
+    },
+    {
+      key: "checks_failed",
+      label: "Failed checks",
+      value: (row: Row) =>
+        row.checks_total ? `${row.checks_failed} of ${row.checks_total}` : null,
+    },
+    { key: "critical_findings", label: "Critical findings" },
+    { key: "approved_by", label: "Approved by" },
+    { key: "expires_at", label: "Expires" },
+  ];
+
+  return (
+    <>
+      <PageHeader
+        title="Approvals"
+        description="The human gate, and the evidence behind each decision."
+        generatedAt={state.generatedAt}
+        actions={
+          <button class="button" onClick={() => setRefresh(refresh + 1)}>
+            <Icon name="refresh" size={16} />
+            Refresh
+          </button>
+        }
+      />
+      <PageState loading={state.loading} error={state.error} />
+      {data && (
+        <>
+          <div class="metric-grid">
+            <MetricCard label="Awaiting approval" value={awaiting.length} />
+            <MetricCard
+              label="Stale bindings"
+              value={data.stale_bindings}
+              detail="Approved against a plan that has since changed"
+            />
+          </div>
+
+          {data.stale_bindings > 0 && (
+            <p class="inline-alert warning" role="status">
+              {data.stale_bindings} approval(s) are bound to a plan that has since
+              changed. Cutover will be refused for these until they are approved again —
+              this is the binding working, not a fault.
+            </p>
+          )}
+
+          <Panel
+            title="Awaiting a decision"
+            subtitle="Approve from the run page; this inbox shows what to weigh before doing so."
+          >
+            {!awaiting.length ? (
+              <p class="empty-state">Nothing is waiting for approval.</p>
+            ) : (
+              <DataTable
+                label="Awaiting approval"
+                rows={awaiting}
+                columns={columns}
+                onRow={(row) => props.navigate(String(row.route || "").replace(/^\//, ""))}
+              />
+            )}
+          </Panel>
+
+          <Panel title="Decided" subtitle="Append-only history; an approval is never overwritten.">
+            {!decided.length ? (
+              <p class="empty-state">No approvals have been decided yet.</p>
+            ) : (
+              <DataTable
+                label="Decided approvals"
+                rows={decided}
+                columns={columns}
+                onRow={(row) => props.onInspect("Approval", row)}
+              />
+            )}
+          </Panel>
+
+          <Panel title="What this page cannot do">
+            <ul class="plain-list">
+              <li>
+                It cannot approve anything. The only path from READY_FOR_APPROVAL to
+                APPROVED is the authenticated approver endpoint, which is a separate
+                identity from every agent — the Cutover Agent cannot approve its own
+                work.
+              </li>
+              <li>
+                A token is bound to <strong>run + plan hash</strong>. Changing the plan
+                after approval does not silently invalidate the run; it makes the
+                cutover refuse, which is what <strong>Plan binding</strong> above
+                reports ahead of time.
+              </li>
+            </ul>
+          </Panel>
+        </>
+      )}
+    </>
+  );
+}

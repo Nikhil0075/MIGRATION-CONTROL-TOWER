@@ -1788,6 +1788,9 @@ const LazyDeadLettersPage = lazy(() =>
 const LazyMemoryBankPage = lazy(() =>
   import("./incidents").then((module) => ({ default: module.MemoryBankPage })),
 );
+const LazyApprovalsPage = lazy(() =>
+  import("./incidents").then((module) => ({ default: module.ApprovalsPage })),
+);
 const LazyEstateWizard = lazy(() =>
   import("./estate-wizard").then((module) => ({
     default: module.EstateWizard,
@@ -1861,6 +1864,12 @@ export function PageRouter(props: PageProps) {
     return (
       <Suspense fallback={<PageState loading error={null} />}>
         <LazyMemoryBankPage {...props} />
+      </Suspense>
+    );
+  if (root === "approvals")
+    return (
+      <Suspense fallback={<PageState loading error={null} />}>
+        <LazyApprovalsPage {...props} />
       </Suspense>
     );
   if (root === "system-health") return <HealthPage {...props} />;

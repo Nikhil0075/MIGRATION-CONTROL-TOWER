@@ -2723,6 +2723,72 @@
         }
       }
     },
+    "/api/v1/approvals": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Approvals",
+        "description": "The cutover approval inbox, with the evidence behind each decision.\n\nThe point of this endpoint is one fact that was previously invisible\nuntil it was too late to matter: an approval token is bound to the\nplan hash it was issued against, and `approval_service.consume()`\nrefuses the cutover if the plan has changed since. That refusal\nhappened at cutover time, long after the human clicked approve. Here\nthe binding is compared up front, so a stale approval is visible\nBEFORE anyone relies on it.\n\nNothing here can approve anything. The only path from\nREADY_FOR_APPROVAL to APPROVED remains the authenticated approver\nendpoint, which is a separate identity from every agent.",
+        "operationId": "approvals_api_v1_approvals_get",
+        "parameters": [
+          {
+            "name": "estate_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Estate Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/legacy": {
       "get": {
         "summary": "Legacy Index",

@@ -17,6 +17,7 @@ const routes = [
   ["incidents", "Incidents"],
   ["dead-letters", "Dead letters"],
   ["memory", "Memory Bank"],
+  ["approvals", "Approvals"],
   ["system-health", "System Health"],
 ] as const;
 
@@ -101,6 +102,39 @@ const fixtureByPath: Record<string, unknown> = {
   "/api/v1/search": [{ id: "run-live", kind: "run", title: "run-live", subtitle: "COMPLETE", route: "/runs/run-live" }],
   "/api/v1/notifications": [{ id: "run-pending", kind: "approval", severity: "info", title: "Cutover approval required", status: "READY_FOR_APPROVAL", route: "/runs/run-pending" }],
   "/api/v1/estate-validations": { status: "NOT_APPLICABLE", detail: "Static source" },
+  "/api/v1/approvals": {
+    stale_bindings: 1,
+    awaiting: [
+      {
+        run_id: "run-pending", estate_id: "wwi-demo-estate", run_state: "READY_FOR_APPROVAL",
+        status: "PENDING", requested_by: "cutover-agent", requested_at: generatedAt,
+        approved_plan_hash: "abc123def456", current_plan_hash: "abc123def456", binding: "intact",
+        checks_total: 5, checks_failed: 0, risk_findings: 3, critical_findings: 0,
+        expires_at: null, expired: false, route: "/runs/run-pending",
+      },
+      {
+        // The case the screen exists for: approved against a plan that has
+        // since moved on, so cutover would be refused.
+        run_id: "run-stale", estate_id: "wwi-demo-estate", run_state: "READY_FOR_APPROVAL",
+        status: "PENDING", requested_by: "cutover-agent", requested_at: generatedAt,
+        approved_plan_hash: "abc123def456", current_plan_hash: "999999999999", binding: "stale",
+        checks_total: 5, checks_failed: 1, risk_findings: 4, critical_findings: 1,
+        expires_at: null, expired: false, route: "/runs/run-stale",
+      },
+    ],
+    decided: [
+      {
+        run_id: "run-live", estate_id: "wwi-demo-estate", run_state: "COMPLETE",
+        status: "APPROVED", requested_by: "cutover-agent", requested_at: generatedAt,
+        approved_by: "approver@example.test", approved_at: generatedAt,
+        justification: "Reconciliation passed on all five checks.",
+        token_id: "tok-1", approved_plan_hash: "abc123def456",
+        current_plan_hash: "abc123def456", binding: "intact",
+        checks_total: 5, checks_failed: 0, risk_findings: 3, critical_findings: 0,
+        expires_at: "2026-09-16T10:00:00Z", expired: false, route: "/runs/run-live",
+      },
+    ],
+  },
   "/api/v1/memory-bank": {
     reused_facts: 1,
     facts: [
@@ -581,4 +615,20 @@ test("the Memory Bank distinguishes reuse from re-confirmation", async ({ page }
   await expect(page.getByText("17", { exact: true }).first()).toBeVisible();
   // The page states the limit of what it is, rather than implying semantic recall.
   await expect(page.getByText(/not semantic similarity/)).toBeVisible();
+});
+
+
+test("an approval bound to a changed plan is flagged before cutover", async ({ page }) => {
+  // approval_service.consume() already refuses this — but at cutover time,
+  // long after a human clicked approve. Saying so up front is the point.
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/approvals");
+  await expect(page.getByRole("heading", { name: "Approvals", exact: true })).toBeVisible();
+
+  await expect(page.getByText(/Cutover will be REFUSED until re-approved/).first()).toBeVisible();
+  await expect(page.getByText(/bound to a plan that has since/)).toBeVisible();
+
+  // And it states plainly that it cannot itself approve anything.
+  await expect(page.getByText(/It cannot approve anything/)).toBeVisible();
 });
