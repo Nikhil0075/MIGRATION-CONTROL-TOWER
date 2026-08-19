@@ -93,6 +93,18 @@ const NAVIGATION: NavItem[] = [
     description: "Scenario quality, scale, and latency",
   },
   {
+    route: "incidents",
+    label: "Incidents",
+    icon: "incidents",
+    description: "Failures, root causes, remediation, and policy denials",
+  },
+  {
+    route: "dead-letters",
+    label: "Dead letters",
+    icon: "dead-letters",
+    description: "Messages the fleet gave up on, with replay",
+  },
+  {
     route: "system-health",
     label: "System Health",
     icon: "health",

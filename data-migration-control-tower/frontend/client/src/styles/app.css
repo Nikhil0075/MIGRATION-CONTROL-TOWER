@@ -401,3 +401,9 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 @media (prefers-reduced-motion: no-preference) {
   .orchestration-stage.is-active .orchestration-node { animation: orchestration-pulse 2.4s ease-in-out infinite; }
 }
+
+/* Dead-letter actions: replay and archive sit together per message, so
+   they read as a pair of choices about one thing rather than two
+   unrelated buttons. */
+.dead-letter-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }

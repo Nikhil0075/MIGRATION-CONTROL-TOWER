@@ -1,0 +1,390 @@
+"""The dead-letter read/replay path.
+
+Pub/Sub is faked here. These tests are about the ACK SEMANTICS, which are
+the part that can silently destroy an operator's evidence, and which no
+amount of live testing would exercise reliably — you cannot conjure a
+poison message on demand.
+
+Two properties matter more than the rest:
+
+  - listing must leave the queue exactly as it found it, or opening the
+    page hides every dead letter from the next reader for a minute;
+  - replay must publish BEFORE it acks, because acking first and then
+    failing to publish destroys the message, and there is no second
+    dead-letter queue behind this one.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from tools import dead_letters as dlq
+
+
+class FakeMessage:
+    def __init__(self, message_id, payload, attributes=None, publish_time=None):
+        self.message_id = message_id
+        self.data = json.dumps(payload).encode("utf-8")
+        self.attributes = attributes or {}
+        self.publish_time = publish_time
+
+
+class FakeReceived:
+    def __init__(self, ack_id, message):
+        self.ack_id = ack_id
+        self.message = message
+
+
+class FakeSubscriber:
+    def __init__(self, messages, log=None):
+        self.messages = messages
+        # Shared with the publisher so ordering between publish and ack is
+        # observable. Two separate logs cannot express "before".
+        self.calls: list[tuple] = log if log is not None else []
+
+    def subscription_path(self, project, subscription):
+        return f"projects/{project}/subscriptions/{subscription}"
+
+    def pull(self, request=None, timeout=None):
+        class Response:
+            received_messages = self.messages[: request["max_messages"]]
+
+        self.calls.append(("pull", request["max_messages"]))
+        return Response()
+
+    def acknowledge(self, request=None):
+        self.calls.append(("ack", tuple(request["ack_ids"])))
+
+    def get_subscription(self, request=None):
+        class Subscription:
+            topic = "projects/p/topics/plan.created"
+
+        self.calls.append(("get_subscription", request["subscription"]))
+        return Subscription()
+
+
+class FakePublisher:
+    def __init__(self, log=None):
+        self.published: list[tuple] = []
+        self.calls: list[tuple] = log if log is not None else []
+
+    def publish(self, topic, data):
+        self.published.append((topic, json.loads(data.decode("utf-8"))))
+        self.calls.append(("publish", topic))
+
+        class Future:
+            def result(self, timeout=None):
+                return "republished-1"
+
+        return Future()
+
+
+@pytest.fixture
+def wired(monkeypatch):
+    """One dead letter, with the attributes Pub/Sub really stamps."""
+    message = FakeMessage(
+        "msg-1",
+        {"run_id": "run-1", "operation_id": "op-1"},
+        attributes={
+            dlq.SOURCE_SUBSCRIPTION_ATTRIBUTE: "projects/p/subscriptions/plan-created-sub",
+            dlq.SOURCE_DELIVERY_ATTEMPT_ATTRIBUTE: "10",
+        },
+    )
+    ordered: list[tuple] = []
+    subscriber = FakeSubscriber([FakeReceived("ack-1", message)], log=ordered)
+    publisher = FakePublisher(log=ordered)
+    released: list[tuple] = []
+
+    monkeypatch.setattr(dlq, "_subscriber", lambda: subscriber)
+    monkeypatch.setattr(dlq, "_publisher", lambda: publisher)
+    monkeypatch.setattr(dlq, "_project_id", lambda: "p")
+    monkeypatch.setattr(
+        dlq, "modify_ack_deadline", lambda sub, ack_id, seconds: released.append((ack_id, seconds))
+    )
+    recorded: list[dict] = []
+    monkeypatch.setattr(
+        dlq, "_record", lambda decoded, **kw: recorded.append({**decoded, **kw})
+    )
+    return subscriber, publisher, released, recorded
+
+
+# ---------------------------------------------------------------------------
+# Reading
+# ---------------------------------------------------------------------------
+
+
+def test_listing_returns_every_lease_so_the_next_reader_sees_the_queue(wired):
+    subscriber, _publisher, released, _recorded = wired
+
+    dlq.list_dead_letters()
+
+    # Every lease taken is handed straight back — the count is one per
+    # polling round, not one per message, because listing polls more than
+    # once (see LIST_ROUNDS).
+    assert released, "listing took leases and never returned them"
+    assert all(seconds == 0 for _ack, seconds in released), "leases must be released immediately"
+    assert not any(call[0] == "ack" for call in subscriber.calls), "listing must never ack"
+
+
+def test_listing_polls_more_than_once_before_calling_the_queue_empty(monkeypatch, wired):
+    """A single Pub/Sub pull may return nothing while messages wait.
+
+    Observed live against a queue holding messages: the first pull returned
+    0 and the next returned all of them. One round would render "nothing
+    has been dead-lettered" over a non-empty queue — the exact opposite of
+    what this page exists to say.
+    """
+    subscriber, _publisher, _released, _recorded = wired
+    rounds: list[int] = []
+    real_pull = dlq._pull
+
+    def flaky(max_messages, timeout):
+        rounds.append(1)
+        return [] if len(rounds) == 1 else real_pull(max_messages, timeout)
+
+    monkeypatch.setattr(dlq, "_pull", flaky)
+    assert len(dlq.list_dead_letters()) == 1, "an empty first pull must not end the listing"
+
+
+def test_listing_deduplicates_across_rounds(wired):
+    # The same message can come back in more than one round; it is one
+    # dead letter, not several.
+    assert len({m["message_id"] for m in dlq.list_dead_letters()}) == len(dlq.list_dead_letters())
+
+
+def test_listing_surfaces_which_consumer_gave_up(wired):
+    [message] = dlq.list_dead_letters()
+    # The whole point of the screen: not just that something failed, but
+    # which consumer stopped trying.
+    assert message["source_subscription"] == "plan-created-sub"
+    assert message["delivery_attempts"] == 10
+    assert message["run_id"] == "run-1"
+
+
+def test_an_undecodable_body_is_shown_rather_than_hidden(monkeypatch, wired):
+    subscriber, _publisher, _released, _recorded = wired
+    subscriber.messages[0].message.data = b"this is not json"
+
+    [message] = dlq.list_dead_letters()
+
+    # A dead letter may well be here BECAUSE it is not the JSON we expect.
+    # Failing the listing would hide the very thing worth looking at.
+    assert "not json" in message["payload"]["_undecodable"]
+
+
+# ---------------------------------------------------------------------------
+# Replay
+# ---------------------------------------------------------------------------
+
+
+def test_replay_publishes_before_it_acks(wired):
+    subscriber, publisher, _released, _recorded = wired
+
+    dlq.replay("msg-1", actor="op@example.internal", justification="Transient outage.")
+
+    # One ordered log, so "before" is actually assertable. Acking first and
+    # then failing to publish destroys the message outright — the one
+    # outcome worse than a duplicate, which _dedup_claim already tolerates.
+    names = [call[0] for call in subscriber.calls]
+    assert "publish" in names, "nothing was republished"
+    assert "ack" in names, "the message was never acked, so it stays queued forever"
+    assert names.index("publish") < names.index("ack"), (
+        f"replay acked before publishing: {subscriber.calls}"
+    )
+
+
+def test_replay_targets_the_topic_the_subscription_actually_points_at(wired):
+    subscriber, publisher, _released, _recorded = wired
+
+    result = dlq.replay("msg-1", actor="op@example.internal", justification="Retrying.")
+
+    assert ("get_subscription", "projects/p/subscriptions/plan-created-sub") in subscriber.calls
+    assert publisher.published[0][0] == "projects/p/topics/plan.created"
+    assert result["topic"] == "plan.created"
+
+
+def test_replay_refuses_when_the_source_is_unknown(monkeypatch, wired):
+    subscriber, publisher, released, _recorded = wired
+    subscriber.messages[0].message.attributes = {}
+
+    with pytest.raises(ValueError, match="cannot be determined"):
+        dlq.replay("msg-1", actor="op@example.internal", justification="Trying anyway.")
+
+    assert not publisher.published, "replaying to a guessed topic is worse than refusing"
+    assert ("ack-1", 0) in released, "the lease must be returned when the action is refused"
+
+
+def test_a_message_that_is_not_there_is_a_lookup_failure_not_a_silent_success(wired):
+    with pytest.raises(LookupError):
+        dlq.replay("no-such-message", actor="op@example.internal", justification="Nope.")
+
+
+def test_other_messages_are_released_while_one_is_taken(monkeypatch, wired):
+    subscriber, _publisher, released, _recorded = wired
+    other = FakeReceived("ack-2", FakeMessage("msg-2", {"run_id": "run-2"}))
+    subscriber.messages.append(other)
+
+    dlq.replay("msg-1", actor="op@example.internal", justification="One at a time.")
+
+    # The bystander must go back immediately rather than being held for the
+    # ack deadline because someone acted on a different message.
+    assert ("ack-2", 0) in released
+    assert ("ack-1", 0) not in released, "the targeted message is acked, not released"
+
+
+# ---------------------------------------------------------------------------
+# Archive
+# ---------------------------------------------------------------------------
+
+
+def test_archive_records_before_it_acks(wired):
+    subscriber, _publisher, _released, recorded = wired
+
+    dlq.archive("msg-1", actor="op@example.internal", justification="Superseded by a newer run.")
+
+    assert recorded, "nothing was written, so acking would have destroyed the evidence"
+    assert recorded[0]["event"] == "archived"
+    assert recorded[0]["actor"] == "op@example.internal"
+    assert any(call[0] == "ack" for call in subscriber.calls)
+
+
+# ---------------------------------------------------------------------------
+# The console API
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def client():
+    from fastapi.testclient import TestClient
+
+    from frontend.app import app
+
+    return TestClient(app)
+
+
+def _token(monkeypatch, claims):
+    import firebase_admin
+    from firebase_admin import auth
+
+    monkeypatch.delenv("APPROVER_ALLOWLIST", raising=False)
+    monkeypatch.setattr(firebase_admin, "_apps", {"test": object()})
+    monkeypatch.setattr(
+        auth,
+        "verify_id_token",
+        lambda _t: {"uid": "dlq-user", "email": "dlq-user@example.internal", **claims},
+    )
+
+
+HEADERS = {"Authorization": "Bearer verified"}
+
+
+def test_reading_the_queue_requires_authentication(client):
+    assert client.get("/api/v1/dead-letters").status_code in (401, 403)
+
+
+def test_replay_requires_the_operator_role(client, monkeypatch):
+    _token(monkeypatch, {"estate_roles": {"*": ["viewer"]}})
+    response = client.post(
+        "/api/v1/dead-letters/msg-1/replay",
+        headers=HEADERS,
+        json={"justification": "A viewer must not be able to republish events."},
+    )
+    assert response.status_code == 403
+
+
+def test_an_unknown_action_is_not_treated_as_a_replay(client, monkeypatch):
+    _token(monkeypatch, {"estate_roles": {"*": ["operator"]}})
+    response = client.post(
+        "/api/v1/dead-letters/msg-1/discard",
+        headers=HEADERS,
+        json={"justification": "Only replay and archive are real actions."},
+    )
+    assert response.status_code == 404
+
+
+def test_an_unreachable_queue_reports_503_rather_than_an_empty_list(client, monkeypatch):
+    """An empty list would read as "nothing failed", which is the opposite
+    of the truth when the queue cannot be reached at all."""
+    _token(monkeypatch, {"estate_roles": {"*": ["viewer"]}})
+
+    def explode(**_kwargs):
+        raise RuntimeError("permission denied on dead-letter-sub")
+
+    monkeypatch.setattr(dlq, "list_dead_letters", explode)
+    response = client.get("/api/v1/dead-letters", headers=HEADERS)
+    assert response.status_code == 503
+    assert "permission denied" in response.json()["detail"]
+
+
+def test_a_missing_message_is_404_not_a_reported_success(client, monkeypatch):
+    _token(monkeypatch, {"estate_roles": {"*": ["operator"]}})
+
+    def missing(message_id, **_kwargs):
+        raise LookupError(f"No dead letter {message_id!r} is available right now.")
+
+    monkeypatch.setattr(dlq, "replay", missing)
+    response = client.post(
+        "/api/v1/dead-letters/gone/replay",
+        headers=HEADERS,
+        json={"justification": "Someone else may have already replayed it."},
+    )
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Where the source subscription came from
+# ---------------------------------------------------------------------------
+
+
+def test_a_broker_stamped_source_is_marked_authoritative(wired):
+    [message] = dlq.list_dead_letters()
+    assert message["source_subscription"] == "plan-created-sub"
+    assert message["source_is_broker_asserted"] is True
+
+
+def test_a_payload_declared_source_is_shown_but_not_trusted(wired):
+    """Messages published straight onto the dead-letter topic carry the
+    source in the BODY. Real ones exist: the acceptance tooling parks stale
+    artifacts there. The body is untrusted content, so it is displayed and
+    flagged rather than believed."""
+    subscriber, _publisher, _released, _recorded = wired
+    subscriber.messages[0].message.attributes = {}
+    subscriber.messages[0].message.data = json.dumps(
+        {"run_id": "run-1", "source_subscription": "plan-created-sub"}
+    ).encode("utf-8")
+
+    [message] = dlq.list_dead_letters()
+
+    assert message["source_subscription"] == "plan-created-sub"
+    assert message["source_is_broker_asserted"] is False
+
+
+def test_replay_refuses_a_subscription_this_system_does_not_consume(monkeypatch, wired):
+    """The allowlist is what makes acting on a payload-declared source safe.
+
+    Without it a message body could name any subscription and the replay
+    would resolve its topic and publish there — a routing decision taken
+    from untrusted content, which is exactly what policy_engine.py is
+    structured to avoid elsewhere.
+    """
+    subscriber, publisher, _released, _recorded = wired
+    subscriber.messages[0].message.attributes = {}
+    subscriber.messages[0].message.data = json.dumps(
+        {"run_id": "run-1", "source_subscription": "attacker-chosen-sub"}
+    ).encode("utf-8")
+    monkeypatch.setattr(dlq, "known_source_subscriptions", lambda: {"plan-created-sub"})
+
+    with pytest.raises(ValueError, match="not a subscription this system consumes"):
+        dlq.replay("msg-1", actor="op@example.internal", justification="Trying it on.")
+
+    assert not publisher.published
+
+
+def test_the_replay_allowlist_comes_from_the_real_consumer_set():
+    # Written out again by hand, it would drift the moment a consumer is
+    # added; derived, a new consumer is replayable automatically.
+    from tools.worker_supervisor import default_specs
+
+    assert dlq.known_source_subscriptions() == {spec.subscription for spec in default_specs()}

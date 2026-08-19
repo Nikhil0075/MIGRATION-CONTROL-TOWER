@@ -282,6 +282,14 @@ NON_ESTATE_MUTATING_ROUTES = {
     # test_every_mutating_route_still_requires_a_coarse_role) and a
     # mandatory justification recorded to operation_audit.
     "/api/v1/workers/{name}/{action}",
+    # A dead letter sits on a fleet-wide subscription. Its payload may
+    # name an estate, but the queue does not belong to one — and
+    # authorizing against an estate id parsed out of a message that
+    # something already failed to process would be worse than not
+    # authorizing at all: it would take its authorization decision from
+    # untrusted content. Guarded by the coarse `operator` role and a
+    # mandatory justification recorded to operation_audit.
+    "/api/v1/dead-letters/{message_id}/{action}",
 }
 
 

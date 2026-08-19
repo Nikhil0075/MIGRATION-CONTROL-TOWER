@@ -2020,3 +2020,164 @@ def set_worker_paused(
     )
     clear_response_cache()
     return _envelope({**result, "action": action})
+
+
+# ---------------------------------------------------------------------------
+# Dead letters and incidents (Day 11 Phase 13)
+# ---------------------------------------------------------------------------
+#
+# Both of these existed as data and neither was reachable. The dead-letter
+# subscription was provisioned and forwarding, but nothing could read it —
+# a message that defeated a consumer showed up only as `error` on the
+# workers panel, with the payload visible solely by running gcloud. The
+# `incidents` subcollection has been written by recovery.py since Day 8 and
+# has never had a screen.
+
+
+class DeadLetterActionRequest(BaseModel):
+    justification: str = Field(min_length=5, max_length=2000)
+
+
+@router.get("/dead-letters", response_model=Envelope)
+def dead_letters(
+    limit: int = Query(default=25, ge=1, le=100),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    """What the fleet gave up on, and which consumer gave up.
+
+    Reading is non-destructive: tools/dead_letters.py returns each lease
+    immediately, so refreshing this page does not hide the queue from the
+    next reader for a minute.
+    """
+    from tools import dead_letters as dlq
+
+    try:
+        pending = dlq.list_dead_letters(limit=limit)
+    except Exception as exc:  # noqa: BLE001 — an unreachable DLQ must not 500 the page
+        raise HTTPException(
+            status_code=503, detail=f"The dead-letter queue could not be read: {exc}"
+        ) from exc
+    return _envelope({"pending": pending, "archive": dlq.list_archive(limit=limit)},
+                     total=len(pending))
+
+
+@router.post("/dead-letters/{message_id}/{action}", response_model=Envelope)
+def act_on_dead_letter(
+    message_id: str,
+    action: str,
+    body: DeadLetterActionRequest,
+    user: UserContext = Depends(require_role("operator")),
+) -> dict:
+    """Replay a dead letter onto its original topic, or archive it.
+
+    NOT estate-scoped, and one of the few mutating routes that does not
+    call authorize_estate — see NON_ESTATE_MUTATING_ROUTES in
+    tests/test_estate_rbac.py. A dead letter is a message on a fleet-wide
+    subscription; its payload may name an estate, but the queue does not
+    belong to one, and authorizing against an estate parsed out of an
+    untrusted payload would be worse than not authorizing at all.
+
+    No Idempotency-Key: the message id IS the idempotency key. Replaying a
+    message that has already been replayed fails with 404 because it is no
+    longer in the queue.
+    """
+    import uuid as _uuid
+
+    from tools import dead_letters as dlq
+
+    if action not in {"replay", "archive"}:
+        raise HTTPException(status_code=404, detail="Unknown dead-letter action.")
+
+    handler = dlq.replay if action == "replay" else dlq.archive
+    try:
+        result = handler(message_id, actor=user.email, justification=body.justification)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    get_client().collection("operation_audit").document(str(_uuid.uuid4())).set(
+        {
+            "kind": f"dead_letter.{action}",
+            "actor": user.email,
+            "roles": sorted(user.roles),
+            "message_id": message_id,
+            "justification": body.justification,
+            "event": action,
+            "recorded_at": _now(),
+            **result,
+        }
+    )
+    clear_response_cache()
+    return _envelope(result)
+
+
+@router.get("/incidents", response_model=Envelope)
+def incidents(
+    estate_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    """Everything that went wrong on a run, in one place.
+
+    Assembled from collections that already exist rather than from a new
+    incident store: recovery.py's per-run `incidents` subcollection, the
+    reconciliation checks that failed, and the policy decisions that
+    denied. `canonical_root_cause` is surfaced rather than `root_cause` —
+    the latter is display-wrapped narrative ("recalled from memory…") and
+    conflating the two was a real defect that nested wrapper text across
+    generations.
+    """
+    _authorize_read(user, estate_id)
+    runs = _all_runs(60, estate_id=estate_id)
+    by_run = {run.get("run_id"): run for run in runs}
+
+    client = get_client()
+    records: list[dict] = []
+    for doc in client.collection_group("incidents").stream():
+        incident = doc.to_dict() or {}
+        run = by_run.get(incident.get("run_id"))
+        if run is None:
+            continue  # another estate's run, or older than the window
+        records.append(
+            {
+                "incident_id": incident.get("incident_id"),
+                "run_id": incident.get("run_id"),
+                "estate_id": run.get("estate_id"),
+                "signature": incident.get("signature"),
+                "table_ref": incident.get("table_ref"),
+                "root_cause": incident.get("canonical_root_cause") or incident.get("root_cause"),
+                "explained_by": incident.get("root_cause_generated_by"),
+                "fix": incident.get("fix") or None,
+                "outcome": incident.get("outcome"),
+                "opened_at": incident.get("created_at"),
+                "run_state": run.get("state"),
+                "memory_refs": run.get("memory_refs") or [],
+                "route": f"/runs/{incident.get('run_id')}",
+            }
+        )
+    records.sort(key=lambda item: item.get("opened_at") or "", reverse=True)
+
+    denials = [
+        {
+            "run_id": decision.get("run_id"),
+            "agent_id": decision.get("agent_id"),
+            "action": decision.get("action"),
+            "resource_class": decision.get("resource_class"),
+            "decided_at": decision.get("decided_at"),
+            "reason": decision.get("reason"),
+        }
+        for decision in (d.to_dict() or {} for d in client.collection_group("policy_decisions").stream())
+        if decision.get("decision") == "DENY" and decision.get("run_id") in by_run
+    ]
+    denials.sort(key=lambda item: item.get("decided_at") or "", reverse=True)
+
+    return _envelope(
+        {
+            "incidents": records,
+            "policy_denials": denials[:50],
+            "open_count": sum(1 for item in records if item.get("outcome") == "PENDING"),
+        },
+        total=len(records),
+    )

@@ -13,6 +13,8 @@ const PATHS: Record<string, string[]> = {
   agents: ["M8 9a4 4 0 1 0 8 0 4 4 0 0 0-8 0ZM4 21a8 8 0 0 1 16 0"],
   evaluations: ["M4 19V9m5 10V5m5 14v-7m5 7V3"],
   health: ["M3 12h4l2-5 4 10 2-5h6"],
+  incidents: ["M12 4 3 20h18z", "M12 10v4m0 3h.01"],
+  "dead-letters": ["M4 6h16v12H4z", "m4 7 8 6 8-6", "M9.5 14.5 12 12l2.5 2.5"],
   search: ["m20 20-4.5-4.5", "M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"],
   alert: ["M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"],
   user: ["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-8 9a8 8 0 0 1 16 0"],

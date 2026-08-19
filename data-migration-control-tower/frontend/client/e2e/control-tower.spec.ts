@@ -14,6 +14,8 @@ const routes = [
   ["policies", "Policies & Approvals"],
   ["agents", "Agents"],
   ["evaluations", "Evaluations"],
+  ["incidents", "Incidents"],
+  ["dead-letters", "Dead letters"],
   ["system-health", "System Health"],
 ] as const;
 
@@ -98,6 +100,39 @@ const fixtureByPath: Record<string, unknown> = {
   "/api/v1/search": [{ id: "run-live", kind: "run", title: "run-live", subtitle: "COMPLETE", route: "/runs/run-live" }],
   "/api/v1/notifications": [{ id: "run-pending", kind: "approval", severity: "info", title: "Cutover approval required", status: "READY_FOR_APPROVAL", route: "/runs/run-pending" }],
   "/api/v1/estate-validations": { status: "NOT_APPLICABLE", detail: "Static source" },
+  "/api/v1/incidents": {
+    open_count: 1,
+    incidents: [
+      {
+        incident_id: "inc-1", run_id: "run-live", signature: "row_loss:Sales.Customers",
+        table_ref: "Sales.Customers", outcome: "RESOLVED",
+        root_cause: "The extract dropped 7 of 663 rows before load.",
+        explained_by: "deterministic", fix: "Reloaded Sales.Customers from source.",
+        opened_at: generatedAt, run_state: "COMPLETE", memory_refs: ["incident/row_loss:Sales.Customers"],
+        route: "/runs/run-live",
+      },
+    ],
+    policy_denials: [
+      { run_id: "run-live", agent_id: "risk-agent", action: "read_raw_pii", resource_class: "PII", decided_at: generatedAt },
+    ],
+  },
+  "/api/v1/dead-letters": {
+    pending: [
+      {
+        message_id: "21367188131118311", source_subscription: "plan-created-sub",
+        delivery_attempts: 10, published_at: generatedAt, run_id: "run-stuck",
+        payload: { run_id: "run-stuck" }, attributes: {},
+      },
+    ],
+    archive: [
+      {
+        message_id: "9900", event: "replayed", source_subscription: "assessment-requested-sub",
+        run_id: "run-old", actor: "operator@example.test",
+        justification: "Transient Firestore outage during the first attempt.",
+        recorded_at: generatedAt,
+      },
+    ],
+  },
 };
 
 async function installApiFixtures(page: Page) {
@@ -470,4 +505,42 @@ test("the orchestration map reports each agent's state from the run's own histor
   await expect(map.locator(".orchestration-stage.is-failed")).toHaveCount(0);
   await expect(map.locator(".orchestration-stage.is-active")).toHaveCount(1);
   await expect(map.locator(".orchestration-stage.is-complete")).toHaveCount(6);
+});
+
+
+test("a dead letter names the consumer that gave up and can be replayed", async ({ page }) => {
+  // Before this screen the payload was reachable only by running gcloud,
+  // and the only symptom was a consumer stuck in `error`.
+  const posted: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/api/v1/dead-letters/")) {
+      posted.push(new URL(request.url()).pathname);
+    }
+  });
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/dead-letters");
+  await expect(page.getByRole("heading", { name: "Dead letters", exact: true })).toBeVisible();
+
+  // Which consumer stopped trying, and after how many attempts.
+  await expect(page.getByText("plan-created-sub").first()).toBeVisible();
+  await expect(page.getByText("10").first()).toBeVisible();
+
+  await page.getByRole("button", { name: /^Replay / }).click();
+  const dialog = page.getByRole("dialog", { name: /^Replay / });
+  await dialog.getByLabel("Justification").fill("The source estate is reachable again.");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+
+  await expect.poll(() => posted.join(",")).toContain("/replay");
+});
+
+test("the incident workspace shows the canonical root cause and the fix", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/incidents");
+  await expect(page.getByRole("heading", { name: "Incidents", exact: true })).toBeVisible();
+  await expect(page.getByText("row_loss:Sales.Customers")).toBeVisible();
+  await expect(page.getByText(/dropped 7 of 663 rows/)).toBeVisible();
+  // The policy engine's refusals belong beside the failures they explain.
+  await expect(page.getByText("read_raw_pii")).toBeVisible();
 });

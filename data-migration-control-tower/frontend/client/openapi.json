@@ -2467,6 +2467,212 @@
         }
       }
     },
+    "/api/v1/dead-letters": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Dead Letters",
+        "description": "What the fleet gave up on, and which consumer gave up.\n\nReading is non-destructive: tools/dead_letters.py returns each lease\nimmediately, so refreshing this page does not hide the queue from the\nnext reader for a minute.",
+        "operationId": "dead_letters_api_v1_dead_letters_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dead-letters/{message_id}/{action}": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Act On Dead Letter",
+        "description": "Replay a dead letter onto its original topic, or archive it.\n\nNOT estate-scoped, and one of the few mutating routes that does not\ncall authorize_estate \u2014 see NON_ESTATE_MUTATING_ROUTES in\ntests/test_estate_rbac.py. A dead letter is a message on a fleet-wide\nsubscription; its payload may name an estate, but the queue does not\nbelong to one, and authorizing against an estate parsed out of an\nuntrusted payload would be worse than not authorizing at all.\n\nNo Idempotency-Key: the message id IS the idempotency key. Replaying a\nmessage that has already been replayed fails with 404 because it is no\nlonger in the queue.",
+        "operationId": "act_on_dead_letter_api_v1_dead_letters__message_id___action__post",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeadLetterActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Incidents",
+        "description": "Everything that went wrong on a run, in one place.\n\nAssembled from collections that already exist rather than from a new\nincident store: recovery.py's per-run `incidents` subcollection, the\nreconciliation checks that failed, and the policy decisions that\ndenied. `canonical_root_cause` is surfaced rather than `root_cause` \u2014\nthe latter is display-wrapped narrative (\"recalled from memory\u2026\") and\nconflating the two was a real defect that nested wrapper text across\ngenerations.",
+        "operationId": "incidents_api_v1_incidents_get",
+        "parameters": [
+          {
+            "name": "estate_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Estate Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/legacy": {
       "get": {
         "summary": "Legacy Index",
@@ -2719,6 +2925,21 @@
           "justification"
         ],
         "title": "CreateEstateRequest"
+      },
+      "DeadLetterActionRequest": {
+        "properties": {
+          "justification": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 5,
+            "title": "Justification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "justification"
+        ],
+        "title": "DeadLetterActionRequest"
       },
       "DeleteEstateRequest": {
         "properties": {

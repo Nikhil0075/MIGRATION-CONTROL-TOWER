@@ -1777,6 +1777,14 @@ const LazyEvaluationsPage = lazy(() =>
 // should not weigh on every page load, and estate-wizard.tsx imports
 // shared components from this module — a static import here would close
 // that cycle at module-evaluation time.
+// Lazy for the cycle reason above: incidents.tsx imports the shared
+// primitives from this module.
+const LazyIncidentsPage = lazy(() =>
+  import("./incidents").then((module) => ({ default: module.IncidentsPage })),
+);
+const LazyDeadLettersPage = lazy(() =>
+  import("./incidents").then((module) => ({ default: module.DeadLettersPage })),
+);
 const LazyEstateWizard = lazy(() =>
   import("./estate-wizard").then((module) => ({
     default: module.EstateWizard,
@@ -1832,6 +1840,18 @@ export function PageRouter(props: PageProps) {
         }
       >
         <LazyEvaluationsPage {...props} />
+      </Suspense>
+    );
+  if (root === "incidents")
+    return (
+      <Suspense fallback={<PageState loading error={null} />}>
+        <LazyIncidentsPage {...props} />
+      </Suspense>
+    );
+  if (root === "dead-letters")
+    return (
+      <Suspense fallback={<PageState loading error={null} />}>
+        <LazyDeadLettersPage {...props} />
       </Suspense>
     );
   if (root === "system-health") return <HealthPage {...props} />;
