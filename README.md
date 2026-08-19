@@ -1,5 +1,9 @@
 # Migration Control Tower
 
+![The control plane: legacy databases pass a policy gateway into a governed
+agent fleet, with a memory vault and audit traces, loading into a cloud
+warehouse](data-migration-control-tower/frontend/client/src/assets/brand/v1/architecture-hero.jpg)
+
 A governed fleet of AI agents that discovers a legacy data estate, assesses
 migration risk, plans and validates a migration to BigQuery, and coordinates a
 human-approved cutover.

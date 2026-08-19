@@ -261,11 +261,31 @@ def slice_contact_sheet(master_path: Path, names: list[str], out_dir: Path, size
         written.append(path)
     return written
 
+
+def build_hero(master_path: Path, out_dir: Path, width: int = 1600) -> list[Path]:
+    """Prepare the architecture hero for the web.
+
+    JPEG, not PNG. The illustration is full of gradients and glow, which
+    is the case PNG is worst at — the 2304px master is 2.6MB and every
+    byte ships to every visitor who reaches the sign-in screen. There is
+    no transparency to preserve here: the art is a full-bleed panel, so
+    the one thing PNG would buy does not apply.
+    """
+    image = Image.open(master_path).convert("RGB")
+    if image.width > width:
+        image = image.resize((width, round(image.height * width / image.width)), Image.LANCZOS)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "architecture-hero.jpg"
+    image.save(path, "JPEG", quality=82, optimize=True, progressive=True)
+    return [path]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("master", type=Path, help="the generated master lockup, on a white background")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--check", action="store_true", help="also write composite proofs")
+    parser.add_argument("--hero", action="store_true", help="prepare a full-bleed hero panel")
     parser.add_argument(
         "--slice-icons",
         help="comma-separated names; treats the master as a contact sheet and cuts one tile per name",
@@ -275,7 +295,9 @@ def main() -> None:
     if not args.master.is_file():
         raise SystemExit(f"No such master image: {args.master}")
 
-    if args.slice_icons:
+    if args.hero:
+        produced = build_hero(args.master, args.out)
+    elif args.slice_icons:
         names = [n.strip() for n in args.slice_icons.split(",") if n.strip()]
         produced = slice_contact_sheet(args.master, names, args.out)
     else:

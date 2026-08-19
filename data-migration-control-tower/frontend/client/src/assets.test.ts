@@ -73,6 +73,9 @@ describe("shipped image assets", () => {
       "favicon-32.png": 10,
       "favicon-48.png": 20,
       "favicon-180.png": 60,
+      // JPEG, and by far the largest asset: it is the one image a visitor
+      // downloads before they can even sign in.
+      "architecture-hero.jpg": 300,
     };
     const oversized = Object.entries(budgetKb)
       .map(([name, limit]) => ({ name, kb: statSync(join(BRAND_DIR, name)).size / 1024, limit }))

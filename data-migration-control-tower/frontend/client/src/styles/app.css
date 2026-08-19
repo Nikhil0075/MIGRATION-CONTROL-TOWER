@@ -410,3 +410,16 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 
 .plain-list { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: .76rem; color: var(--mct-muted); }
 .plain-list strong { color: var(--mct-ink); }
+
+/* Sign-in hero (Day 11 Phase 14).
+   Two columns rather than a full-bleed background: the card is centred,
+   so a background image would sit directly under the text it has to stay
+   legible against. Side by side, the artwork never touches the copy. */
+.auth-shell { display: grid; gap: 28px; align-items: center; width: min(1180px, 100%); }
+.auth-page-hero .auth-card { width: min(480px, 100%); }
+.auth-art { display: none; }
+.auth-art img { width: 100%; height: auto; border-radius: 8px; box-shadow: 0 18px 50px rgba(11,37,69,.22); }
+@media (min-width: 900px) {
+  .auth-shell { grid-template-columns: minmax(380px, 480px) 1fr; }
+  .auth-art { display: block; }
+}

@@ -67,7 +67,8 @@ export function AuthenticationGate({
   };
 
   return (
-    <main class="auth-page">
+    <main class="auth-page auth-page-hero">
+      <div class="auth-shell">
       <section class="auth-card" aria-labelledby="auth-title">
         <img
           class="brand-mark"
@@ -158,6 +159,13 @@ export function AuthenticationGate({
           administrator and every dashboard action is audited.
         </p>
       </section>
+      {/* Decorative, and hidden below 900px rather than squashed: the
+          artwork is 142KB that a phone signing in does not need, and a
+          scaled-down isometric scene reads as noise. */}
+      <aside class="auth-art" aria-hidden="true">
+        <img src="/assets/brand/v1/architecture-hero.jpg" alt="" loading="lazy" />
+      </aside>
+      </div>
     </main>
   );
 }

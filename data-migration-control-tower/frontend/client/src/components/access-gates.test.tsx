@@ -34,3 +34,28 @@ describe("brand mark accessibility", () => {
     expect(logo.getAttribute("src")).toMatch(/^\/assets\/brand\//);
   });
 });
+
+describe("sign-in hero", () => {
+  it("is decorative, so a screen reader is not told about the artwork", () => {
+    render(<AuthenticationGate {...authProps} />);
+    const art = document.querySelector(".auth-art");
+    expect(art?.getAttribute("aria-hidden")).toBe("true");
+    expect(art?.querySelector("img")?.getAttribute("alt")).toBe("");
+  });
+
+  it("loads the hero from our own origin and defers it", () => {
+    // img-src is 'self'. And nothing about the sign-in FORM depends on the
+    // artwork, so it must not block the thing the page exists to do.
+    render(<AuthenticationGate {...authProps} />);
+    const img = document.querySelector(".auth-art img") as HTMLImageElement;
+    expect(img.getAttribute("src")).toMatch(/^\/assets\/brand\//);
+    expect(img.getAttribute("loading")).toBe("lazy");
+  });
+
+  it("keeps the artwork out of the no-access screen", () => {
+    // That screen is an error state. Celebrating it would be the wrong
+    // register for someone who has just been told they have no access.
+    render(<NoAccessGate email="someone@example.internal" onSignOut={vi.fn()} />);
+    expect(document.querySelector(".auth-art")).toBeNull();
+  });
+});
