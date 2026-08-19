@@ -35,7 +35,7 @@ from agents.lineage.agent import build_dependency_graph  # noqa: E402
 from agents.orchestrator.run_lifecycle import create_run, transition_state, write_catalog  # noqa: E402
 from agents.planner.agent import propose_plan  # noqa: E402
 from agents.risk.agent import classify_estate, verify_pii_access_boundary  # noqa: E402
-from tools.pack_loader import build_adapter_for_pack, load_pack  # noqa: E402
+from tools.pack_loader import build_adapter_for_estate, load_pack  # noqa: E402
 
 REPORTS_DIR = REPO_ROOT / "evaluation" / "reports"
 
@@ -53,7 +53,7 @@ def run_assessment(
     on_run_created: Callable[[str], None] | None = None,
 ) -> dict:
     pack = load_pack(pack_path)
-    adapter = build_adapter_for_pack(pack)
+    adapter = build_adapter_for_estate(pack, estate_id)
 
     print(f"[assessment] pack={pack['pack_id']!r} v{pack['version']}, source={adapter.system!r}")
 

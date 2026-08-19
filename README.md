@@ -182,7 +182,7 @@ estate exists.
 ### 4. Run it
 
 ```bash
-python data-migration-control-tower/run_ui.py
+python run_ui.py
 ```
 
 That is the only command an operator runs. The console publishes a durable
@@ -224,7 +224,7 @@ make test
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend | 551 | `make test` |
+| Backend | 556 | `make test` |
 | Component (vitest) | 37 | `cd frontend/client && npm test` |
 | Browser (Playwright + axe) | 25 | `cd frontend/client && npm run test:e2e` |
 
@@ -285,7 +285,7 @@ policies/        agent permissions, data classification, wave limits
 frontend/        FastAPI API + Oracle JET console
 simulator/       source estates: WideWorldImporters, Postgres, Oracle corpus
 evaluation/      scenario harness and scale reports
-tests/           551 backend tests
+tests/           556 backend tests
 ```
 
 Detailed day-by-day build history, including what each stage proves and why

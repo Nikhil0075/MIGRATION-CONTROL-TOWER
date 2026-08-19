@@ -248,3 +248,52 @@ def build_adapter_for_pack(pack: dict) -> SourceAdapter:
 
     source = find_source(estate, pack["source_id"])
     return build_adapter(source["adapter"], **(source.get("config") or {}))
+
+
+def build_adapter_for_estate(pack: dict, estate_id: str | None) -> SourceAdapter:
+    """Binds the adapter to the estate being assessed, not to the pack's own.
+
+    `build_adapter_for_pack` resolves the source from the pack's OWN estate
+    document and calls `build_adapter(...)` with no `binding=`. That is
+    correct for the CLI demo path — the pack and the estate are the same
+    thing there — but wrong for a console-initiated assessment, which names
+    an estate the pack has never heard of. Without a binding the adapter has
+    no way to resolve credentials: PostgresAdapter says so and raises, and
+    SqlServerAdapter silently falls back to process env vars, which is worse
+    — it connects to whatever the machine happens to point at rather than to
+    the estate that was asked for.
+
+    A pack's `source_id` is its own fixture's name (`retail-postgres`), while
+    an onboarded estate names its source whatever the operator typed
+    (`finance-postgres`). Matching on the id alone would therefore fail for
+    every real onboarding, so the id is preferred and the adapter family is
+    the fallback.
+    """
+    if not estate_id:
+        return build_adapter_for_pack(pack)
+
+    from tools.adapters import build_adapter_for_binding
+    from tools.connection_context import binding_from_estate, find_source, load_estate_document
+
+    wanted = find_source(estate_for_pack(pack), pack["source_id"])["adapter"]
+    estate = load_estate_document(estate_id)
+    sources = estate.get("sources") or []
+
+    by_id = [s for s in sources if s.get("source_id") == pack["source_id"]]
+    candidates = by_id or [s for s in sources if s.get("adapter") == wanted]
+
+    if not candidates:
+        raise RuntimeError(
+            f"Estate {estate_id!r} has no {wanted!r} source, so pack "
+            f"{pack['pack_id']!r} cannot be assessed against it. Its sources are: "
+            f"{[s.get('source_id') for s in sources] or 'none'}."
+        )
+    if len(candidates) > 1:
+        # Guessing here would assess one source and label the result with
+        # the estate, which reads as coverage that was never measured.
+        raise RuntimeError(
+            f"Estate {estate_id!r} has {len(candidates)} {wanted!r} sources "
+            f"({[s.get('source_id') for s in candidates]}); the pack does not say "
+            f"which to assess. Name one of them {pack['source_id']!r}, or split the estate."
+        )
+    return build_adapter_for_binding(binding_from_estate(estate, candidates[0]["source_id"]))

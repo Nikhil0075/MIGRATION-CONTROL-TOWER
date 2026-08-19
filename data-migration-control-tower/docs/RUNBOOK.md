@@ -32,8 +32,12 @@ make seed
 ```
 
 ```bash
-python run_ui.py
+cd .. && python run_ui.py
 ```
+
+(`run_ui.py` sits at the repository root and changes into this directory
+itself — it is the one command here that is not run from
+`data-migration-control-tower/`.)
 
 `make seed` is idempotent. Nothing resolves an agent capability until the
 Agent Registry is seeded, and nothing resolves a source connection until an

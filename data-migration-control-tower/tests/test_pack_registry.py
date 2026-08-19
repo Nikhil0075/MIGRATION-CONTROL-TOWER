@@ -196,3 +196,91 @@ def test_wwi_pack_declares_the_previously_hardcoded_table():
 
 def test_a_pack_without_scheduled_tables_derives_from_the_catalog():
     assert scheduled_tables(get_pack(ORACLE)) == []
+
+
+# ---------------------------------------------------------------------------
+# Binding a pack's adapter to the estate actually being assessed
+# ---------------------------------------------------------------------------
+
+
+def _pack_with(source_id: str = "retail-postgres") -> dict:
+    return {"pack_id": "test_pack", "source_id": source_id}
+
+
+def _estate(*sources: dict) -> dict:
+    return {"estate_id": "test-estate", "sources": list(sources)}
+
+
+def _patch(monkeypatch, estate: dict, pack_adapter: str = "postgres"):
+    from tools import pack_loader
+
+    monkeypatch.setattr(pack_loader, "estate_for_pack", lambda pack: _estate(
+        {"source_id": pack["source_id"], "adapter": pack_adapter}
+    ))
+    monkeypatch.setattr(
+        "tools.connection_context.load_estate_document", lambda estate_id: estate
+    )
+    built = {}
+    monkeypatch.setattr(
+        "tools.adapters.build_adapter_for_binding",
+        lambda binding: built.setdefault("binding", binding),
+    )
+    return built
+
+
+def test_no_estate_id_keeps_the_pack_s_own_adapter(monkeypatch):
+    """The CLI demo path must not change: there the pack and the estate are
+    the same thing, and there is nothing to rebind."""
+    from tools import pack_loader
+
+    sentinel = object()
+    monkeypatch.setattr(pack_loader, "build_adapter_for_pack", lambda pack: sentinel)
+    assert pack_loader.build_adapter_for_estate(_pack_with(), None) is sentinel
+
+
+def test_the_adapter_binds_to_the_named_estate_not_the_pack_s(monkeypatch):
+    """Without this the adapter carries no binding at all: Postgres raises,
+    and SQL Server quietly falls back to process env vars — connecting to
+    whatever the machine points at rather than the estate requested."""
+    from tools import pack_loader
+
+    estate = _estate({"source_id": "finance-postgres", "adapter": "postgres"})
+    built = _patch(monkeypatch, estate)
+    pack_loader.build_adapter_for_estate(_pack_with(), "test-estate")
+    assert built["binding"].source_id == "finance-postgres"
+    assert built["binding"].estate_id == "test-estate"
+
+
+def test_a_matching_source_id_wins_over_the_adapter_family(monkeypatch):
+    from tools import pack_loader
+
+    estate = _estate(
+        {"source_id": "other-postgres", "adapter": "postgres"},
+        {"source_id": "retail-postgres", "adapter": "postgres"},
+    )
+    built = _patch(monkeypatch, estate)
+    pack_loader.build_adapter_for_estate(_pack_with(), "test-estate")
+    assert built["binding"].source_id == "retail-postgres"
+
+
+def test_an_estate_without_a_matching_source_says_so(monkeypatch):
+    from tools import pack_loader
+
+    estate = _estate({"source_id": "wwi-sqlserver", "adapter": "sqlserver"})
+    _patch(monkeypatch, estate)
+    with pytest.raises(RuntimeError, match="has no 'postgres' source"):
+        pack_loader.build_adapter_for_estate(_pack_with(), "test-estate")
+
+
+def test_an_ambiguous_estate_refuses_to_guess(monkeypatch):
+    """Assessing one of two sources and labelling the result with the estate
+    reports coverage that was never measured."""
+    from tools import pack_loader
+
+    estate = _estate(
+        {"source_id": "a-postgres", "adapter": "postgres"},
+        {"source_id": "b-postgres", "adapter": "postgres"},
+    )
+    _patch(monkeypatch, estate)
+    with pytest.raises(RuntimeError, match="does not say"):
+        pack_loader.build_adapter_for_estate(_pack_with(), "test-estate")
