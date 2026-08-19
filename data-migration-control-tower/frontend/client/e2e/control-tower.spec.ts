@@ -50,7 +50,24 @@ const fixtureByPath: Record<string, unknown> = {
   "/api/v1/lineage": { nodes: [{ id: "source.orders", label: "Orders", classification: "PII", confidence: 0.98 }], edges: [] },
   "/api/v1/reconciliation": [{ run_id: "run-live", status: "PASSED", delta: 0, tolerance: 0 }],
   "/api/v1/policies": { decisions: [{ policy_id: "cutover-approval", decision: "ALLOW", acting_identity: "approver@example.test" }], approvals: [] },
-  "/api/v1/agents": { cards: [{ agent_id: "orchestrator", version: "1.0.0", status: "HEALTHY", owner: "Data Platform" }], pinned_run_counts: {} },
+  // Real registry shape: the ids the seeds actually publish, and APPROVED,
+  // which is what the registry emits. The previous fixture used an
+  // "orchestrator" agent that is not in the registry at all and a HEALTHY
+  // status that no card ever carries, so it exercised a state the console
+  // cannot encounter.
+  "/api/v1/agents": {
+    cards: [
+      { agent_id: "discovery-agent", version: "1.0.0", status: "APPROVED", owner: "Data Platform", model: "gemini-2.0-flash", framework: "adk", capabilities: ["discovery.catalog.estate"] },
+      { agent_id: "discovery-agent", version: "1.1.0", status: "APPROVED", owner: "Data Platform", model: "gemini-2.0-flash", framework: "adk", capabilities: ["discovery.catalog.estate"] },
+      { agent_id: "lineage-agent", version: "1.0.0", status: "APPROVED", owner: "Data Platform", model: "gemini-2.0-flash", framework: "adk", capabilities: ["lineage.graph.build"] },
+      { agent_id: "risk-agent", version: "1.0.0", status: "APPROVED", owner: "Data Platform", model: "gemini-2.0-flash", framework: "adk", capabilities: ["risk.assess.estate"] },
+      { agent_id: "planner-agent", version: "1.0.0", status: "APPROVED", owner: "Data Platform", model: "gemini-2.0-flash", framework: "adk", capabilities: ["planner.plan.propose"] },
+      { agent_id: "validation-agent", version: "1.0.0", status: "APPROVED", owner: "Data Platform", model: "gemini-2.0-flash", framework: "adk", capabilities: ["validation.reconcile.source_target"] },
+      { agent_id: "cutover-agent", version: "1.0.0", status: "APPROVED", owner: "Data Platform", model: "gemini-2.0-flash", framework: "adk", capabilities: ["cutover.request_approval"] },
+      { agent_id: "finance-impact-agent", version: "1.0.0", status: "APPROVED", owner: "Finance Systems", model: "gemini-2.0-flash", framework: "adk", capabilities: ["impact.assessment.finance_reporting"] },
+    ],
+    pinned_run_counts: { "discovery-agent": 3, "risk-agent": 1 },
+  },
   "/api/v1/evaluations": { runs: [{ scenario: "full-migration", status: "PASSED" }], scale_metrics: null, scale_report_reason: "No persisted scale report." },
   "/api/v1/system-health": { build_version: "e2e", services: [{ service: "Cloud Run", status: "HEALTHY", freshness: generatedAt }] },
   "/api/v1/workers": {
@@ -394,4 +411,28 @@ test("the brand identity is actually applied, not just present in the CSS", asyn
   expect(
     await logo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0),
   ).toBe(true);
+});
+
+
+test("the agent fleet renders one identified card per agent", async ({ page }) => {
+  // The fleet story — seven specialists resolved by capability — was
+  // previously invisible: every agent was an identical table row.
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/agents");
+  await expect(page.getByRole("heading", { name: "Agents", exact: true })).toBeVisible();
+
+  const fleet = page.locator(".agent-grid .agent-card");
+  await expect(fleet).toHaveCount(7);
+
+  // Discovery is seeded at two approved versions; it is one agent.
+  await expect(page.getByText("Discovery", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("v1.1.0", { exact: false }).first()).toBeVisible();
+
+  // Every icon must have decoded — a wrong path returns index.html with a
+  // 200, so a broken icon leaves no trace in the network log.
+  const undecoded = await page.locator(".agent-grid img.agent-badge-art").evaluateAll(
+    (images) => images.filter((img: HTMLImageElement) => !img.complete || img.naturalWidth === 0).length,
+  );
+  expect(undecoded).toBe(0);
 });

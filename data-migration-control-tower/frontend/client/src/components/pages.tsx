@@ -6,6 +6,7 @@ import { api, idempotencyKey } from "../api";
 import { Column, EstateSummary, ProgressSnapshot, Role, Session } from "../models";
 import { formatValue, statusTone } from "../status";
 import { Icon } from "./icons";
+import { AgentBadge } from "./agents";
 
 type RecordRow = Record<string, any>;
 export type PageProps = {
@@ -1432,6 +1433,40 @@ function PoliciesPage(props: PageProps) {
   );
 }
 
+/** One card per agent: the newest APPROVED version.
+ *
+ * The registry keeps every version, and an agent legitimately has several
+ * approved at once — bumping Discovery to 1.1.0 while 1.0.0 stays approved
+ * is the documented way to roll a capability forward without breaking runs
+ * pinned to the old card. Rendering the raw list therefore shows the same
+ * agent twice, which reads as a duplicate rather than as version history.
+ * Versions are compared numerically per segment so 1.10.0 sorts above
+ * 1.9.0, which a string compare gets backwards.
+ */
+function latestApprovedPerAgent(cards: RecordRow[]): RecordRow[] {
+  const rank = (version: unknown) =>
+    String(version || "0")
+      .split(".")
+      .map((part) => Number(part) || 0);
+  const newest = new Map<string, RecordRow>();
+  for (const card of cards) {
+    if (card.status !== "APPROVED") continue;
+    const id = String(card.agent_id);
+    const held = newest.get(id);
+    if (!held) {
+      newest.set(id, card);
+      continue;
+    }
+    const [a, b] = [rank(card.version), rank(held.version)];
+    for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+      if ((a[i] || 0) === (b[i] || 0)) continue;
+      if ((a[i] || 0) > (b[i] || 0)) newest.set(id, card);
+      break;
+    }
+  }
+  return [...newest.values()].sort((x, y) => String(x.agent_id).localeCompare(String(y.agent_id)));
+}
+
 function AgentsPage(props: PageProps) {
   const state = useResource<RecordRow>(estatePath("/api/v1/agents", props.activeEstateId));
   const pinnedRunCounts = state.data?.pinned_run_counts || {};
@@ -1444,6 +1479,32 @@ function AgentsPage(props: PageProps) {
       />
       <PageState loading={state.loading} error={state.error} />
       {state.data && (
+        <>
+        {/* The fleet, before the registry detail. Every agent used to be an
+            identical table row, so "who is doing this and what for" meant
+            decoding an id string. Cards answer it at a glance; the table
+            below still carries the version, ownership and capability
+            detail an operator needs after that. */}
+        <Panel title="The fleet" subtitle="Seven specialists, resolved by capability — never by direct import.">
+          <div class="agent-grid">
+            {latestApprovedPerAgent(state.data.cards || []).map((card: RecordRow) => (
+                <button
+                  key={card.agent_id}
+                  type="button"
+                  class="agent-card"
+                  onClick={() => props.onInspect("Agent card", card)}
+                >
+                  <AgentBadge agentId={String(card.agent_id)} />
+                  <span class="agent-card-meta">
+                    <StatusPill value={card.status} />
+                    <small>
+                      v{card.version} · {pinnedRunCounts[card.agent_id] || 0} pinned
+                    </small>
+                  </span>
+                </button>
+              ))}
+          </div>
+        </Panel>
         <Panel title="Agent registry">
           <DataTable
             label="Agents"
@@ -1465,6 +1526,7 @@ function AgentsPage(props: PageProps) {
             onRow={(row) => props.onInspect("Agent card", row)}
           />
         </Panel>
+        </>
       )}
     </>
   );

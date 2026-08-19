@@ -375,3 +375,35 @@ describe("pack-driven migration readiness", () => {
     expect(screen.queryByText("No executable Migration Pack is assigned.")).toBeNull();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// The agent fleet
+// ---------------------------------------------------------------------------
+
+describe("agent fleet cards", () => {
+  const cards = [
+    { agent_id: "discovery-agent", version: "1.0.0", status: "APPROVED" },
+    // The registry keeps both, deliberately: bumping a capability while the
+    // old card stays approved is how runs pinned to it keep working.
+    { agent_id: "discovery-agent", version: "1.1.0", status: "APPROVED" },
+    { agent_id: "risk-agent", version: "1.0.0", status: "APPROVED" },
+    { agent_id: "planner-agent", version: "2.0.0", status: "DRAFT" },
+  ];
+
+  it("shows one card per agent, at its newest approved version", async () => {
+    mockApi({ "/api/v1/agents": { cards, pinned_run_counts: {} } });
+    render(<PageRouter {...pageProps} route="agents" />);
+    expect(await screen.findByText("Discovery")).toBeTruthy();
+    expect(screen.getAllByText("Discovery")).toHaveLength(1);
+    expect(screen.getByText(/v1\.1\.0/)).toBeTruthy();
+  });
+
+  it("leaves unapproved versions out of the fleet", async () => {
+    mockApi({ "/api/v1/agents": { cards, pinned_run_counts: {} } });
+    render(<PageRouter {...pageProps} route="agents" />);
+    await screen.findByText("Discovery");
+    // Planner is DRAFT only — it is a real registry state, not a fleet member.
+    expect(screen.queryByText("Planner")).toBeNull();
+  });
+});

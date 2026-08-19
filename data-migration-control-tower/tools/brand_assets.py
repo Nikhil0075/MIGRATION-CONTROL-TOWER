@@ -196,17 +196,92 @@ def build(master_path: Path, out_dir: Path, check: bool) -> list[Path]:
     return written
 
 
+
+def _bands(filled: list[bool], min_run: int) -> list[tuple[int, int]]:
+    """Contiguous runs of True, ignoring runs shorter than min_run."""
+    bands: list[tuple[int, int]] = []
+    start = None
+    for index, value in enumerate(filled):
+        if value and start is None:
+            start = index
+        elif not value and start is not None:
+            if index - start >= min_run:
+                bands.append((start, index))
+            start = None
+    if start is not None and len(filled) - start >= min_run:
+        bands.append((start, len(filled)))
+    return bands
+
+
+def slice_contact_sheet(master_path: Path, names: list[str], out_dir: Path, size: int = 256) -> list[Path]:
+    """Cut a grid of icon tiles out of one generated sheet.
+
+    Generating seven icons as seven jobs produces seven STYLES: the model
+    redraws stroke weight, corner radius and glow every call, and the set
+    reads as clip art collected from different places. Drawn in a single
+    pass they share construction by definition, so the only work left is
+    cutting them apart.
+
+    The grid is found by projection rather than assumed: rows and columns
+    of non-background pixels give the bands, so a sheet with different
+    spacing or a different tile count still slices correctly. Tiles are
+    taken in reading order and matched to `names` positionally; any extra
+    cells (the sheet is asked for one empty cell to make the count
+    obvious) are ignored.
+    """
+    keyed = key_white_to_alpha(Image.open(master_path))
+    alpha = keyed.getchannel("A")
+    width, height = keyed.size
+
+    row_filled = [alpha.crop((0, y, width, y + 1)).getbbox() is not None for y in range(height)]
+    rows = _bands(row_filled, min_run=height // 20)
+    if not rows:
+        raise ValueError("no icon rows found — is this a contact sheet?")
+
+    cells: list[tuple[int, int, int, int]] = []
+    for top, bottom in rows:
+        strip = alpha.crop((0, top, width, bottom))
+        col_filled = [strip.crop((x, 0, x + 1, bottom - top)).getbbox() is not None for x in range(width)]
+        for left, right in _bands(col_filled, min_run=width // 30):
+            cells.append((left, top, right, bottom))
+
+    if len(cells) < len(names):
+        raise ValueError(f"found {len(cells)} tiles but need {len(names)}: {cells}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for name, box in zip(names, cells):
+        tile = trim(keyed.crop(box))
+        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        art = tile.copy()
+        art.thumbnail((size, size), Image.LANCZOS)
+        canvas.paste(art, ((size - art.width) // 2, (size - art.height) // 2), art)
+        path = out_dir / f"{name}.png"
+        canvas.save(path, "PNG", optimize=True)
+        written.append(path)
+    return written
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("master", type=Path, help="the generated master lockup, on a white background")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--check", action="store_true", help="also write composite proofs")
+    parser.add_argument(
+        "--slice-icons",
+        help="comma-separated names; treats the master as a contact sheet and cuts one tile per name",
+    )
     args = parser.parse_args()
 
     if not args.master.is_file():
         raise SystemExit(f"No such master image: {args.master}")
 
-    for path in build(args.master, args.out, args.check):
+    if args.slice_icons:
+        names = [n.strip() for n in args.slice_icons.split(",") if n.strip()]
+        produced = slice_contact_sheet(args.master, names, args.out)
+    else:
+        produced = build(args.master, args.out, args.check)
+
+    for path in produced:
         size_kb = path.stat().st_size / 1024
         print(f"  {path.relative_to(REPO_ROOT) if REPO_ROOT in path.parents else path}  {size_kb:.0f} KB")
 
