@@ -33,14 +33,17 @@ def _declared_topics() -> set[str]:
     text = SETUP.read_text(encoding="utf-8")
     block = re.search(r"TOPICS=\((.*?)\)", text, re.S)
     assert block, "gcp_setup.sh no longer declares a TOPICS array"
-    return set(re.findall(r'"([a-z][a-z.]+)"', block.group(1)))
+    # Hyphens allowed: topic names are dotted (migration.requested) but
+    # the dead-letter topic is not an event, so it is named like the
+    # subscriptions instead.
+    return set(re.findall(r'"([a-z][a-z.-]+)"', block.group(1)))
 
 
 def _declared_subscriptions() -> dict[str, str]:
     text = SETUP.read_text(encoding="utf-8")
     block = re.search(r"SUBSCRIPTIONS=\((.*?)\n\)", text, re.S)
     assert block, "gcp_setup.sh no longer declares a SUBSCRIPTIONS array"
-    return dict(re.findall(r'\["([a-z-]+)"\]="([a-z][a-z.]+)"', block.group(1)))
+    return dict(re.findall(r'\["([a-z-]+)"\]="([a-z][a-z.-]+)"', block.group(1)))
 
 
 def _published_topics() -> set[str]:
@@ -158,3 +161,71 @@ def test_the_supervisor_does_not_consume_validation_passed():
     from tools.worker_supervisor import default_specs
 
     assert "validation-passed-sub" not in {spec.subscription for spec in default_specs()}
+
+
+# ---------------------------------------------------------------------------
+# Dead-lettering (Day 11 Phase 10)
+# ---------------------------------------------------------------------------
+#
+# A looping consumer that nacks re-pulls the same bad message instantly.
+# Backoff stops it spinning; only a dead-letter policy makes it stop.
+
+DEAD_LETTER_TOPIC = "dead-letter"
+DEAD_LETTER_SUB = "dead-letter-sub"
+
+
+def _setup_text() -> str:
+    return SETUP.read_text(encoding="utf-8")
+
+
+def test_the_dead_letter_topic_and_its_subscription_are_declared():
+    """A dead-letter topic with no subscription is a black hole: messages
+    land there, nothing retains them, and they are dropped — while the
+    policy makes it look like they were captured."""
+    assert DEAD_LETTER_TOPIC in _declared_topics()
+    assert _declared_subscriptions().get(DEAD_LETTER_SUB) == DEAD_LETTER_TOPIC
+
+
+def test_every_consumed_subscription_gets_a_dead_letter_policy():
+    """The policy is attached by looping over SUBSCRIPTIONS, so a new
+    subscription inherits it. This pins the loop, not a list that would
+    need editing twice."""
+    text = _setup_text()
+    assert "--dead-letter-topic=" in text
+    assert "--max-delivery-attempts=" in text
+    assert 'for sub in "${!SUBSCRIPTIONS[@]}"' in text
+
+
+def test_the_dead_letter_subscription_is_excluded_from_the_policy():
+    """Dead-lettering the dead-letter subscription onto its own topic
+    would loop a message back to where it already failed."""
+    assert '[ "$sub" = "$DEAD_LETTER_SUB" ] && continue' in _setup_text()
+
+
+def test_the_pubsub_service_agent_is_granted_both_roles():
+    """The single easiest thing to miss here, and silent when missed:
+    Pub/Sub's own service agent forwards the message, and it needs
+    publisher on the dead-letter topic AND subscriber on the source
+    subscription. Without both, forwarding fails, the message is
+    redelivered forever, and the policy looks configured while doing
+    nothing."""
+    text = _setup_text()
+    assert "gcp-sa-pubsub.iam.gserviceaccount.com" in text
+    assert "topics add-iam-policy-binding" in text
+    assert "subscriptions add-iam-policy-binding" in text
+
+
+def test_the_policy_is_applied_by_update_not_only_on_create():
+    """Every subscription already exists in an established project, so a
+    create-only guard would leave exactly the projects running the workers
+    without a policy — the drift class that left assessment.requested
+    unprovisioned while the script claimed otherwise."""
+    assert "gcloud pubsub subscriptions update" in _setup_text()
+
+
+def test_max_delivery_attempts_is_in_the_range_pubsub_accepts():
+    """Pub/Sub rejects anything outside 5..100, and the script would fail
+    at the very end of a long provisioning run."""
+    match = re.search(r"MAX_DELIVERY_ATTEMPTS=(\d+)", _setup_text())
+    assert match, "the setup script no longer sets MAX_DELIVERY_ATTEMPTS"
+    assert 5 <= int(match.group(1)) <= 100

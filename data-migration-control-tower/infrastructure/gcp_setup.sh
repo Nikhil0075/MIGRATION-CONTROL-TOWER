@@ -80,6 +80,7 @@ TOPICS=(
   "cutover.completed"     # durable completion event
   "assessment.requested"  # operator-console guided assessment action
   "wave.override.requested" # audited operator wave override
+  "dead-letter"           # poison messages, see the dead-lettering step below
 )
 for topic in "${TOPICS[@]}"; do
   if ! gcloud pubsub topics describe "$topic" --project="$PROJECT_ID" >/dev/null 2>&1; then
@@ -107,6 +108,10 @@ declare -A SUBSCRIPTIONS=(
   ["validation-failed-sub"]="validation.failed"
   ["assessment-requested-sub"]="assessment.requested"
   ["cutover-approved-sub"]="cutover.approved"
+  # Without this the dead-letter topic is a black hole: messages land
+  # there, no subscription retains them, and they are dropped. That is
+  # worse than no dead-lettering, because you believe you captured them.
+  ["dead-letter-sub"]="dead-letter"
 )
 for sub in "${!SUBSCRIPTIONS[@]}"; do
   topic="${SUBSCRIPTIONS[$sub]}"
@@ -118,6 +123,57 @@ for sub in "${!SUBSCRIPTIONS[@]}"; do
   else
     echo "    Subscription '$sub' already exists, skipping."
   fi
+done
+
+echo "==> Attaching dead-letter policies (Day 11 Phase 10)..."
+# Why this exists. The one-shot workers exited after a single failure, so
+# a permanently-failing message was simply left in the subscription. The
+# in-process supervisor (tools/worker_supervisor.py) loops, and `nack`
+# sets the ack deadline to 0 — a poison message comes straight back. Its
+# per-consumer exponential backoff stops that from spinning the CPU, but
+# backoff alone never ENDS: without a dead-letter policy the same bad
+# message is retried until its retention expires, and the consumer makes
+# no progress on anything queued behind it.
+#
+# One shared dead-letter topic rather than one per subscription. Pub/Sub
+# stamps each dead-lettered message with the attributes
+# CloudPubSubDeadLetterSourceSubscription and
+# ...SourceTopicPublishTime, so provenance survives and nine near-empty
+# topics do not have to.
+DEAD_LETTER_TOPIC="dead-letter"
+DEAD_LETTER_SUB="dead-letter-sub"
+# 10 attempts, not the minimum 5. With the supervisor's backoff (5s
+# doubling to a 120s cap) that is roughly ten minutes of retrying, which
+# outlasts a transient Firestore or network blip but still ends. 5 would
+# dead-letter a healthy message during a brief outage; 100 would take
+# most of a day to give up.
+MAX_DELIVERY_ATTEMPTS=10
+
+PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+# The Pub/Sub service agent — Google's own identity, not ours. It is what
+# actually forwards a dead-lettered message, and it needs BOTH bindings
+# below. This is the step that is easy to miss and silent when missed:
+# without them Pub/Sub cannot forward, so the message is redelivered
+# forever and the dead-letter policy appears configured while doing
+# nothing at all.
+PUBSUB_SA="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
+
+gcloud pubsub topics add-iam-policy-binding "$DEAD_LETTER_TOPIC"   --member="serviceAccount:${PUBSUB_SA}"   --role=roles/pubsub.publisher   --project="$PROJECT_ID" --quiet >/dev/null
+
+for sub in "${!SUBSCRIPTIONS[@]}"; do
+  # Never dead-letter the dead-letter subscription onto itself.
+  [ "$sub" = "$DEAD_LETTER_SUB" ] && continue
+
+  gcloud pubsub subscriptions add-iam-policy-binding "$sub"     --member="serviceAccount:${PUBSUB_SA}"     --role=roles/pubsub.subscriber     --project="$PROJECT_ID" --quiet >/dev/null
+
+  # `update`, unconditionally, rather than only on create. Every one of
+  # these subscriptions already exists in an established project, so a
+  # create-only guard would leave exactly those projects — the ones
+  # actually running the workers — with no dead-letter policy. That is
+  # the same drift that left assessment.requested unprovisioned while the
+  # script claimed otherwise. update is idempotent.
+  gcloud pubsub subscriptions update "$sub"     --dead-letter-topic="$DEAD_LETTER_TOPIC"     --max-delivery-attempts="$MAX_DELIVERY_ATTEMPTS"     --project="$PROJECT_ID" --quiet >/dev/null
+  echo "    '$sub' -> '$DEAD_LETTER_TOPIC' after $MAX_DELIVERY_ATTEMPTS attempts."
 done
 
 echo "==> Ensuring service account '$SA_ORCHESTRATOR' exists..."
@@ -193,6 +249,8 @@ echo "    Firestore:      (default) native mode"
 echo "    BigQuery:       ${PROJECT_ID}:${BQ_DATASET}"
 echo "    Pub/Sub topics: ${TOPICS[*]}"
 echo "    Pub/Sub subs:   ${!SUBSCRIPTIONS[*]}"
+echo "    Dead letters:   -> '$DEAD_LETTER_TOPIC' after $MAX_DELIVERY_ATTEMPTS attempts;"
+echo "                    inspect with: gcloud pubsub subscriptions pull $DEAD_LETTER_SUB --limit=10"
 echo "    Orchestrator SA: $SA_EMAIL"
 echo "    Agent SAs:       ${!AGENT_SAS[*]}"
 echo ""
