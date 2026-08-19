@@ -1504,6 +1504,99 @@ function EvaluationsPage(props: PageProps) {
   );
 }
 
+// The panel that turns "queued, but nothing is happening" from a mystery
+// into a glance. Before the in-process consumers existed that state meant
+// "go run a script in a terminal"; now it means one of three specific,
+// visible things — a consumer is paused, this instance is on standby
+// behind another one, or a handler is failing — and each is named here.
+function WorkersPanel(props: PageProps) {
+  const [refresh, setRefresh] = useState(0);
+  const state = useResource<RecordRow>("/api/v1/workers", refresh);
+  const canOperate = (props.estateRoles || props.session.roles).includes("operator");
+  const data = state.data as any;
+  const consumers: RecordRow[] = data?.consumers || [];
+  const lease = data?.lease || {};
+
+  async function control(name: string, action: "pause" | "resume", justification: string) {
+    const result = await api(`/api/v1/workers/${name}/${action}`, {
+      method: "POST",
+      body: JSON.stringify({ justification }),
+    });
+    setRefresh((value) => value + 1);
+    return result;
+  }
+
+  return (
+    <Panel
+      title="Event consumers"
+      subtitle="Every console action publishes a command; these are what consume them."
+    >
+      <PageState loading={state.loading} error={state.error} />
+      {data && !data.enabled && (
+        <p class="form-message" role="status">
+          In-process workers are not running here: {data.reason}. Queued
+          operations will stay queued until a process with workers enabled
+          picks them up.
+        </p>
+      )}
+      {data?.enabled && !lease.held && (
+        <p class="form-message" role="status">
+          Standby — {lease.standby_reason}. This is normal for a second
+          instance: only the lease holder consumes, so the same message is
+          never handled twice.
+        </p>
+      )}
+      {data?.enabled && (
+        <>
+          <DataTable
+            label="Consumers"
+            rows={consumers}
+            columns={[
+              { key: "name", label: "Consumer" },
+              { key: "subscription", label: "Subscription" },
+              { key: "state", label: "State", status: true },
+              { key: "last_message_at", label: "Last message" },
+              { key: "processed_count", label: "Handled" },
+              { key: "error_count", label: "Errors" },
+              // Backlog is deliberately null from the API: real queue depth
+              // needs google-cloud-monitoring and an IAM role this project
+              // does not grant. formatValue renders that as "Not available",
+              // which is honest — a zero would read as "nothing queued".
+              { key: "backlog", label: "Backlog" },
+            ]}
+            onRow={(row) => props.onInspect("Consumer detail", row)}
+          />
+          <div class="action-row">
+            {consumers.map((consumer: any) => (
+              <ActionForm
+                key={consumer.name}
+                title={
+                  consumer.state === "paused"
+                    ? `Resume ${consumer.name}`
+                    : `Pause ${consumer.name}`
+                }
+                description={
+                  consumer.state === "paused"
+                    ? `Resume ${consumer.name} so it consumes ${consumer.subscription} again.`
+                    : `Pause ${consumer.name}. It stops taking new messages from ${consumer.subscription}; anything already in flight finishes. This affects EVERY estate on that subscription, not just the one selected.`
+                }
+                disabled={!canOperate}
+                onSubmit={(justification) =>
+                  control(
+                    consumer.name,
+                    consumer.state === "paused" ? "resume" : "pause",
+                    justification,
+                  )
+                }
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </Panel>
+  );
+}
+
 function HealthPage(props: PageProps) {
   const [refresh, setRefresh] = useState(0);
   const state = useResource<RecordRow>(estatePath("/api/v1/system-health", props.activeEstateId), refresh);
@@ -1553,6 +1646,11 @@ function HealthPage(props: PageProps) {
           </Panel>
         </>
       )}
+      {/* Outside the system-health guard on purpose. If that request is
+          slow or failing, this panel is precisely the one an operator
+          needs — hiding it behind another endpoint's success would take
+          the answer away exactly when the question is being asked. */}
+      <WorkersPanel {...props} />
     </>
   );
 }

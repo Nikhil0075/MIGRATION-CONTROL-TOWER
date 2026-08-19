@@ -2339,6 +2339,134 @@
         }
       }
     },
+    "/api/v1/workers": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Workers",
+        "description": "Per-consumer state plus who holds the worker lease.\n\nDeliberately not estate-scoped, and readable by any viewer: the\nconsumer fleet is a property of the process, not of an estate, and it\ncarries no estate data \u2014 only subscription names and counters.",
+        "operationId": "workers_api_v1_workers_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workers/{name}/{action}": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Set Worker Paused",
+        "description": "Pauses or resumes one consumer, or \"all\".\n\nNOT estate-scoped, and one of the few mutating routes that does not\ncall authorize_estate \u2014 see NON_ESTATE_MUTATING_ROUTES in\ntests/test_estate_rbac.py. A consumer serves every estate on the\nsubscription, so there is no estate to authorize against; picking one\nwould misrepresent the blast radius rather than contain it. The\ncoarse `operator` role plus a recorded justification is the control.\n\nPause is durable (Firestore worker_controls/{name}), not a local flag:\non Cloud Run this request lands on an arbitrary instance, very likely\nnot the lease holder, and an in-process flag would silently do\nnothing. It also has to survive a restart \u2014 a consumer paused for a\nreason must not resume itself on the next deploy.\n\nNo Idempotency-Key: pausing a paused consumer is a no-op with no\ndata-plane effect. It is still attributed, through operation_audit.",
+        "operationId": "set_worker_paused_api_v1_workers__name___action__post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerControlRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/legacy": {
       "get": {
         "summary": "Legacy Index",
@@ -3042,6 +3170,21 @@
           "justification"
         ],
         "title": "WaveOverrideRequest"
+      },
+      "WorkerControlRequest": {
+        "properties": {
+          "justification": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 5,
+            "title": "Justification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "justification"
+        ],
+        "title": "WorkerControlRequest"
       }
     }
   }

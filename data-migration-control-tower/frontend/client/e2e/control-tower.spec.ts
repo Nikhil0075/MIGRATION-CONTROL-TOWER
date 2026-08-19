@@ -53,6 +53,15 @@ const fixtureByPath: Record<string, unknown> = {
   "/api/v1/agents": { cards: [{ agent_id: "orchestrator", version: "1.0.0", status: "HEALTHY", owner: "Data Platform" }], pinned_run_counts: {} },
   "/api/v1/evaluations": { runs: [{ scenario: "full-migration", status: "PASSED" }], scale_metrics: null, scale_report_reason: "No persisted scale report." },
   "/api/v1/system-health": { build_version: "e2e", services: [{ service: "Cloud Run", status: "HEALTHY", freshness: generatedAt }] },
+  "/api/v1/workers": {
+    enabled: true,
+    started_at: generatedAt,
+    lease: { held: true, owner_id: "e2e-owner", holder: { hostname: "e2e", pid: 1, is_self: true }, standby_reason: null },
+    consumers: [
+      { name: "assessment", subscription: "assessment-requested-sub", state: "idle", last_message_at: generatedAt, processed_count: 3, error_count: 0, backlog: null },
+      { name: "plan", subscription: "plan-created-sub", state: "paused", last_message_at: generatedAt, processed_count: 1, error_count: 0, backlog: null },
+    ],
+  },
   "/api/v1/search": [{ id: "run-live", kind: "run", title: "run-live", subtitle: "COMPLETE", route: "/runs/run-live" }],
   "/api/v1/notifications": [{ id: "run-pending", kind: "approval", severity: "info", title: "Cutover approval required", status: "READY_FOR_APPROVAL", route: "/runs/run-pending" }],
   "/api/v1/estate-validations": { status: "NOT_APPLICABLE", detail: "Static source" },
@@ -286,4 +295,60 @@ test("an assessment-only adapter follows credential-free validation", async ({ p
   await expect(page.getByText("NOT_APPLICABLE")).toBeVisible();
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByText("Migration Pack", { exact: true }).first()).toBeVisible();
+});
+
+
+test("an operator can pause a consumer from System Health", async ({ page }) => {
+  // The console has to be able to stop the fleet as well as watch it —
+  // otherwise "everything is operated from the dashboard" is only true
+  // while nothing is going wrong.
+  const posted: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/api/v1/workers/")) {
+      posted.push(new URL(request.url()).pathname);
+    }
+  });
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/system-health");
+
+  // A paused consumer must offer Resume, not Pause: a button that says
+  // the opposite of what it does is worse than no button.
+  await expect(page.getByRole("button", { name: "Resume plan" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Pause assessment" }).click();
+  const dialog = page.getByRole("dialog", { name: "Pause assessment" });
+  await expect(dialog).toBeVisible();
+  await dialog
+    .getByLabel("Justification")
+    .fill("Holding assessments while the source estate is patched.");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+
+  await expect.poll(() => posted).toContain("/api/v1/workers/assessment/pause");
+});
+
+test("the workers panel names the reason when nothing is consuming", async ({ page }) => {
+  // "Queued but nothing is happening" was the confusion this whole change
+  // exists to remove. An empty table would reproduce it exactly.
+  await installApiFixtures(page);
+  await page.route("**/api/v1/workers", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          enabled: false,
+          reason: "CONTROL_TOWER_WORKERS is set to off for this process",
+          lease: { held: false, standby_reason: null },
+          consumers: [],
+        },
+        meta: { generated_at: generatedAt, freshness: "live" },
+      }),
+    });
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/system-health");
+  await expect(
+    page.getByText(/CONTROL_TOWER_WORKERS is set to off for this process/),
+  ).toBeVisible();
 });

@@ -265,6 +265,24 @@ def test_a_legacy_global_operator_token_still_works(client, monkeypatch):
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
+#: Mutating routes that legitimately have no estate to authorize against.
+#: Named and justified one by one, rather than weakening the check below
+#: for every route — the whole value of that check is that a new endpoint
+#: cannot forget authorize_estate() silently, and a broad predicate
+#: ("skip anything without an estate_id argument") would hand back exactly
+#: that silence.
+NON_ESTATE_MUTATING_ROUTES = {
+    # The consumer fleet is a property of the PROCESS, not of an estate:
+    # one subscription serves every estate, so pausing it has fleet-wide
+    # blast radius and there is no estate that could be authorized to
+    # authorize it. Naming one would understate the effect rather than
+    # contain it. Guarded instead by the coarse `operator` role (pinned by
+    # test_every_mutating_route_still_requires_a_coarse_role) and a
+    # mandatory justification recorded to operation_audit.
+    "/api/v1/workers/{name}/{action}",
+}
+
+
 def _mutating_routes():
     for route in api_v1.router.routes:
         methods = getattr(route, "methods", set()) & _MUTATING_METHODS
@@ -286,6 +304,8 @@ def test_every_mutating_route_calls_authorize_estate():
     """
     missing = []
     for route in _mutating_routes():
+        if route.path in NON_ESTATE_MUTATING_ROUTES:
+            continue
         source = inspect.getsource(route.endpoint)
         if not re.search(r"\bauthorize_estate\s*\(", source):
             missing.append(f"{sorted(route.methods)} {route.path} -> {route.endpoint.__name__}")
@@ -467,3 +487,11 @@ def test_an_allowlisted_operator_can_actually_onboard(client, monkeypatch):
     )
     assert response.status_code == 201, response.text
     assert created["estate_id"] == "allowlist-estate"
+
+
+def test_the_estate_authorization_exemptions_still_exist():
+    """An exemption for a route that has been renamed or deleted is a hole
+    left open for whatever takes that path next."""
+    paths = {route.path for route in _mutating_routes()}
+    stale = NON_ESTATE_MUTATING_ROUTES - paths
+    assert not stale, f"exempted routes that no longer exist: {sorted(stale)}"

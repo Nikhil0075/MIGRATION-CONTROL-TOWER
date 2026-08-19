@@ -1765,3 +1765,93 @@ def approve(
     )
     result["data"]["approval"] = {"status": "APPROVED", "approved_by": user.email, "token_id": token["token_id"]}
     return result
+
+
+# ---------------------------------------------------------------------------
+# Workers (Day 11 Phase 10)
+# ---------------------------------------------------------------------------
+#
+# The console publishes a durable command for every operator action, and
+# tools/worker_supervisor.py is what finally consumes them in-process. That
+# makes "queued but nothing is happening" a state an operator can now
+# cause — by pausing a consumer, or by running an instance that does not
+# hold the worker lease — so it has to be a state they can also SEE. This
+# is the endpoint behind the System Health page's Workers panel.
+
+
+class WorkerControlRequest(BaseModel):
+    justification: str = Field(min_length=5, max_length=2000)
+
+
+@router.get("/workers", response_model=Envelope)
+def workers(user: UserContext = Depends(get_user_context)) -> dict:
+    """Per-consumer state plus who holds the worker lease.
+
+    Deliberately not estate-scoped, and readable by any viewer: the
+    consumer fleet is a property of the process, not of an estate, and it
+    carries no estate data — only subscription names and counters.
+    """
+    from frontend import worker_runtime
+
+    return _envelope(worker_runtime.status())
+
+
+@router.post("/workers/{name}/{action}", response_model=Envelope)
+def set_worker_paused(
+    name: str,
+    action: str,
+    body: WorkerControlRequest,
+    user: UserContext = Depends(require_role("operator")),
+) -> dict:
+    """Pauses or resumes one consumer, or "all".
+
+    NOT estate-scoped, and one of the few mutating routes that does not
+    call authorize_estate — see NON_ESTATE_MUTATING_ROUTES in
+    tests/test_estate_rbac.py. A consumer serves every estate on the
+    subscription, so there is no estate to authorize against; picking one
+    would misrepresent the blast radius rather than contain it. The
+    coarse `operator` role plus a recorded justification is the control.
+
+    Pause is durable (Firestore worker_controls/{name}), not a local flag:
+    on Cloud Run this request lands on an arbitrary instance, very likely
+    not the lease holder, and an in-process flag would silently do
+    nothing. It also has to survive a restart — a consumer paused for a
+    reason must not resume itself on the next deploy.
+
+    No Idempotency-Key: pausing a paused consumer is a no-op with no
+    data-plane effect. It is still attributed, through operation_audit.
+    """
+    import uuid as _uuid
+
+    from frontend import worker_runtime
+
+    if action not in {"pause", "resume"}:
+        raise HTTPException(status_code=404, detail="Unknown worker action.")
+
+    supervisor = worker_runtime.get_supervisor()
+    if supervisor is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No worker supervisor is running in this process, so there is nothing to pause.",
+        )
+
+    try:
+        result = supervisor.set_paused(
+            name, action == "pause", actor=user.email, justification=body.justification
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"No such consumer: {name!r}") from exc
+
+    get_client().collection("operation_audit").document(str(_uuid.uuid4())).set(
+        {
+            "kind": f"worker.{action}",
+            "actor": user.email,
+            "roles": sorted(user.roles),
+            "consumers": result["consumers"],
+            "justification": body.justification,
+            "event": action,
+            "recorded_at": _now(),
+        }
+    )
+    clear_response_cache()
+    return _envelope({**result, "action": action})

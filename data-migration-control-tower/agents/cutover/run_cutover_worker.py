@@ -57,25 +57,27 @@ def _finish(run_id: str) -> dict:
     return {"run_id": run_id, "state": final}
 
 
-def main() -> None:
-    messages = pull(SUBSCRIPTION, max_messages=1, timeout=30)
-    if not messages:
-        raise SystemExit("No cutover.approved message was available.")
-    payload = messages[0]
+def handle_cutover_approved(payload: dict) -> dict:
+    """Runs one cutover.approved command. Returns the final run state.
+
+    Pure function of one payload — no pull, ack or nack; the caller owns
+    the message. Shared by the CLI wrapper below and the in-process
+    supervisor so the operation-record lifecycle exists once.
+
+    Note the unhealthy branch. `_finish` RETURNS (rather than raising)
+    when a post-cutover monitoring check is not HEALTHY, leaving the run
+    at MONITORING. Recording that as "done" would report a cutover that
+    did not complete as successful, so it is recorded as failed with the
+    monitoring evidence attached. `_finish` itself is left alone — four
+    tests pin its behaviour, and the honest fix belongs at the boundary
+    that interprets the result.
+    """
     operation_id = payload.get("operation_id")
-    operation_ref = get_client().collection("operation_requests").document(operation_id) if operation_id else None
+    operation_ref = (
+        get_client().collection("operation_requests").document(operation_id) if operation_id else None
+    )
     try:
         result = _finish(payload["run_id"])
-        if operation_ref:
-            operation_ref.update(
-                {
-                    "status": "done",
-                    "result": result,
-                    "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                }
-            )
-        ack(SUBSCRIPTION, payload["_pubsub_ack_id"])
-        print(f"cutover complete: run_id={result['run_id']}")
     except Exception as exc:
         if operation_ref:
             operation_ref.update(
@@ -85,8 +87,47 @@ def main() -> None:
                     "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                 }
             )
+        raise
+
+    completed = result.get("state") == "COMPLETE"
+    if operation_ref:
+        operation_ref.update(
+            {
+                "status": "done" if completed else "failed",
+                "result": result,
+                "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                **(
+                    {}
+                    if completed
+                    else {
+                        "error": (
+                            f"cutover halted at {result.get('state')}: post-cutover monitoring "
+                            f"reported {(result.get('monitoring') or {}).get('status', 'an unhealthy target')}"
+                        )
+                    }
+                ),
+            }
+        )
+    return result
+
+
+def main() -> None:
+    """CLI wrapper: one message, then exit. The supervisor calls
+    handle_cutover_approved directly."""
+    from tools.worker_supervisor import warn_if_a_supervisor_is_running
+
+    warn_if_a_supervisor_is_running()
+    messages = pull(SUBSCRIPTION, max_messages=1, timeout=30)
+    if not messages:
+        raise SystemExit("No cutover.approved message was available.")
+    payload = messages[0]
+    try:
+        result = handle_cutover_approved(payload)
+    except Exception:
         nack(SUBSCRIPTION, payload["_pubsub_ack_id"])
         raise
+    ack(SUBSCRIPTION, payload["_pubsub_ack_id"])
+    print(f"cutover finished: run_id={result['run_id']} state={result['state']}")
 
 
 if __name__ == "__main__":

@@ -39,10 +39,22 @@ python run_ui.py
 Agent Registry is seeded, and nothing resolves a source connection until an
 estate exists.
 
-**One thing that is easy to miss.** The console publishes commands; workers
-consume them. Every worker below handles **one message and exits** — it is
-not a daemon. One click in the console, one run of the matching command. If
-a worker prints "No … message was available", nothing was queued.
+**`python run_ui.py` is the only command this runbook needs.** The console
+publishes a durable command for every operator action, and the event
+consumers now run *inside* that same process — so a click is the whole
+action, not the first half of one. There is no worker script to run per
+click any more.
+
+Check it once, in the console: **System Health → Event consumers**. Eight
+consumers, `idle`, lease held by this process. That panel is also the
+answer whenever an operation sits at `queued` — see "When something does
+not happen" below.
+
+The CLI workers still exist and are still documented, but as the debugging
+path for when a consumer is paused. They warn you if a supervisor is
+already consuming, because otherwise "No … message was available" reads
+like a broken publish when it actually means the console already handled
+it.
 
 ---
 
@@ -82,20 +94,23 @@ carrying a credential value.
 Validation must succeed before Next unlocks, and editing any source or
 connection field invalidates it.
 
-### A3. Start the assessment, then run its worker
+### A3. Start the assessment
 
-**Start assessment** in the console returns `202 Accepted` and writes a
-durable operation record. Then:
+**Start assessment** in the console. Nothing else — no terminal.
 
-```bash
-python agents/discovery/run_assessment_worker.py
-```
-
-One invocation drives the whole read-only chain:
+The button returns `202 Accepted` and writes a durable operation record;
+the `assessment` consumer picks it up within a poll interval and drives
+the whole read-only chain:
 
 ```
 REQUESTED → DISCOVERED → ANALYZED → RISK_ASSESSED → PLANNED
 ```
+
+Watch the progress bar move `queued → published → active → done`. It
+should never sit on **"Waiting for a worker"** — that label existed
+because nothing consumed the command, and seeing it now means the
+consumer is paused, erroring, or not running here. System Health says
+which.
 
 ### A4. Read the result
 
@@ -152,28 +167,28 @@ What to watch for in the output:
 | `cutover self-approval denied: True` | the Cutover agent cannot approve itself |
 | `final_state=COMPLETE` | the run finished |
 
-### B2. Or drive it from the console
+### B2. Or drive it from the console, with no terminal at all
 
-Start the orchestrator, which consumes `migration.requested` onward:
+1. **Runs → Start migration** on `wwi-demo-estate`. The `migration`
+   consumer takes it from there; discovery, risk, planning, execution and
+   validation each publish the next event and the next consumer picks it
+   up. The seeded row-loss defect is recovered without a manual step.
+2. Watch **Runs** advance to `PASSED`, then `READY_FOR_APPROVAL`.
+3. **Approve** in the console, with a justification. This is the human
+   action and a distinct identity from every agent — the Cutover agent
+   still cannot approve itself, and the token is bound to the plan hash,
+   so an approval cannot be replayed against a changed plan.
+4. The `cutover` consumer performs the cutover and post-cutover
+   monitoring. The run reaches `COMPLETE`.
 
-```bash
-python agents/orchestrator/run_orchestrator.py
-```
+If a target is not HEALTHY after cutover, the run stops at `MONITORING`
+and the operation is recorded **failed**, carrying the monitoring
+evidence — not `done`. A cutover that did not complete must never be
+reported as one that did.
 
-Then **Runs → Start migration** in the console. Approval is a separate,
-human step:
-
-```bash
-python agents/cutover/approve_cutover.py <run_id>
-```
-
-```bash
-python agents/cutover/run_cutover_worker.py
-```
-
-Only `approve_cutover.py` calls `approve()` — never agent code — and the
-token is bound to the plan hash, so an approval cannot be replayed against
-a changed plan.
+`agents/cutover/approve_cutover.py` remains the CLI equivalent of step 3.
+Only it and the console approval endpoint call `approve()` — never agent
+code.
 
 ---
 
@@ -197,8 +212,22 @@ make test
 
 ## When something does not happen
 
-**A worker exits saying no message was available.** The click did not
-publish. Check the operation record:
+**An operation sits at `queued` and nothing advances.** Open **System
+Health → Event consumers**. There are only four answers and the panel
+names each one:
+
+| What it says | What it means |
+|---|---|
+| the consumer is `paused` | someone paused it, with a justification recorded in `operation_audit`. Resume it there. |
+| `Standby — another instance holds the worker lease` | a second process is doing the work. Normal, not a fault: only the lease holder consumes, so no message is handled twice. |
+| `In-process workers are not running here` | this process was started with `CONTROL_TOWER_WORKERS=0` — the deployed image does that deliberately. |
+| the consumer is `error` with a last error | the handler is failing. The error is the diagnosis. |
+
+**A CLI worker exits saying no message was available.** If the console is
+running, this is expected — its consumer took the message first, and the
+script says so before it pulls. Pause that consumer from System Health if
+you want to drive it by hand. Otherwise the click did not publish; check
+the operation record:
 
 ```bash
 python -c "import sys;sys.path.insert(0,'.');from dotenv import load_dotenv;load_dotenv('.env');from tools.firestore_client import get_client;[print(d.id,(d.to_dict() or {}).get('status'),(d.to_dict() or {}).get('error','')) for d in get_client().collection('operation_requests').stream()]"

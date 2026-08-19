@@ -31,6 +31,7 @@ Three jobs, in order of how much trouble they save:
 from __future__ import annotations
 
 import functools
+import os
 import sys
 from pathlib import Path
 
@@ -43,6 +44,15 @@ if str(REPO_ROOT) not in sys.path:
 from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(REPO_ROOT / ".env")
+
+# A test session must never start the in-process event consumers. They
+# default to ON — the whole point of the supervisor is that running the
+# server is the only thing anyone runs — so importing frontend.app under
+# test would otherwise start eight threads that pull REAL Pub/Sub
+# subscriptions and mutate live Firestore, stealing messages from the
+# developer's own console. Set, not setdefault: a value inherited from
+# .env must lose to this.
+os.environ["CONTROL_TOWER_WORKERS"] = "0"
 
 
 # ---------------------------------------------------------------------------

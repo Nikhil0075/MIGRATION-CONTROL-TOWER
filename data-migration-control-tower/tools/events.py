@@ -99,6 +99,48 @@ def ack(subscription: str, ack_id: str) -> None:
     subscriber.acknowledge(request={"subscription": subscription_path, "ack_ids": [ack_id]})
 
 
+#: Pub/Sub refuses a single modifyAckDeadline above this.
+MAX_ACK_DEADLINE_SECONDS = 600
+
+
+def modify_ack_deadline(subscription: str, ack_id: str, seconds: int) -> None:
+    """Resets one message's ack deadline to `seconds` from now.
+
+    Two callers, opposite intents:
+      0  — redeliver immediately (see nack below).
+      >0 — extend the lease while a long handler is still working
+           (tools/worker_supervisor.py's heartbeat).
+
+    The extension exists because every subscription in
+    infrastructure/gcp_setup.sh is created with --ack-deadline=60, while
+    a real assessment or migration runs for minutes. A one-shot CLI
+    worker hid that: the redelivered copy only reappeared on the next
+    manual run. A looping consumer picks it straight back up and re-runs
+    the work, so the lease has to be held deliberately.
+
+    **It buys an hour, not forever.** Pub/Sub caps a message's total
+    outstanding lifetime at roughly one hour no matter how often the
+    deadline is extended. Work exceeding that WILL be redelivered and
+    re-executed. That is survivable here — execute_migration truncates
+    and reloads on its first batch, and transition_state raises on an
+    illegal repeat rather than corrupting state — but it is a real
+    ceiling, not a theoretical one.
+    """
+    if seconds < 0 or seconds > MAX_ACK_DEADLINE_SECONDS:
+        raise ValueError(
+            f"ack deadline must be between 0 and {MAX_ACK_DEADLINE_SECONDS} seconds, got {seconds}"
+        )
+    subscriber = _subscriber()
+    subscription_path = subscriber.subscription_path(_project_id(), subscription)
+    subscriber.modify_ack_deadline(
+        request={
+            "subscription": subscription_path,
+            "ack_ids": [ack_id],
+            "ack_deadline_seconds": seconds,
+        }
+    )
+
+
 def nack(subscription: str, ack_id: str) -> None:
     """Immediately makes a message available for redelivery (resets its
     ack deadline to 0) instead of making Pub/Sub wait out the full
@@ -106,8 +148,24 @@ def nack(subscription: str, ack_id: str) -> None:
     be retried — e.g. a Wave Manager capacity HOLD (see
     agents/orchestrator/orchestrator.py's _consume() helper), which is
     exactly the scenario this function exists to make actually work."""
-    subscriber = _subscriber()
-    subscription_path = subscriber.subscription_path(_project_id(), subscription)
-    subscriber.modify_ack_deadline(
-        request={"subscription": subscription_path, "ack_ids": [ack_id], "ack_deadline_seconds": 0}
-    )
+    modify_ack_deadline(subscription, ack_id, 0)
+
+
+def warm_clients() -> None:
+    """Builds the cached Pub/Sub and Firestore clients on the CALLING thread.
+
+    The clients are @lru_cache(maxsize=1) singletons and lru_cache
+    construction is not lock-protected, so two consumer threads entering
+    _subscriber() together can each build a SubscriberClient — one is then
+    discarded WITHOUT its gRPC transport being closed, leaking a channel.
+
+    Call once from the main thread before starting any consumer. The unary
+    RPCs themselves are thread-safe; only the lazy construction is not.
+    """
+    _project_id()
+    _publisher()
+    _subscriber()
+
+    from tools.firestore_client import get_client
+
+    get_client()

@@ -18,6 +18,23 @@
 # advanced via any local script (run_full_migration.py, run_harness.py,
 # ...) is immediately visible here. No SQL Server/BigQuery credentials
 # are needed at this layer — the UI only ever reads Firestore.
+#
+# That last sentence stays true only because the in-process event
+# consumers are DISABLED here (CONTROL_TOWER_WORKERS=0 below). They
+# default to ON locally, and they write: they run Discovery, execute
+# migrations and perform cutovers. Three concrete things block them in
+# this image, and all three must be fixed before the flag is flipped:
+#
+#   1. orchestrator.py passes simulator/source_setup/oracle_dialect_corpus
+#      and simulator/source_setup/dags into Discovery. Neither is copied
+#      below — only estate.yaml is.
+#   2. python:3.11-slim has no unixODBC/msodbcsql18, so `import pyodbc`
+#      fails outright for any SQL Server estate.
+#   3. the service account needs roles/pubsub.subscriber; it has publish
+#      rights only.
+#
+# Whoever flips it rewrites this header in the same commit. A stale
+# "read-only" claim is worse than no claim.
 
 FROM node:22-bookworm-slim AS client-build
 
@@ -45,6 +62,8 @@ COPY --from=client-build /ui/web frontend/client/web
 
 ENV PYTHONPATH=/app
 ENV PORT=8080
+# See the header: this image cannot run the consumers yet.
+ENV CONTROL_TOWER_WORKERS=0
 
 RUN useradd --system --uid 10001 --create-home controltower
 USER controltower

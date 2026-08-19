@@ -35,6 +35,8 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(REPO_ROOT / ".env")
 
+from contextlib import asynccontextmanager  # noqa: E402
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Request  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
@@ -51,7 +53,31 @@ from frontend.security import (  # noqa: E402
     get_approver_identity,
 )
 
-app = FastAPI(title="Autonomous Data Migration Control Tower")
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Starts the in-process event consumers alongside the API.
+
+    This is what makes the console the only thing an operator runs. Every
+    console action already published a durable Pub/Sub command; until now
+    a human had to run a one-shot script per click to consume it, and
+    GET /api/v1/operations/{id} reported the gap in words as "Waiting for
+    a worker".
+
+    Two supervisors in one deployment is normal rather than exceptional —
+    `uvicorn --reload` runs a reloader parent and a child, and Cloud Run
+    autoscales — so consumption is gated on a Firestore lease and the
+    loser idles in standby. See tools/instance_lock.py.
+    """
+    from frontend.worker_runtime import start_supervisor, stop_supervisor
+
+    start_supervisor()
+    try:
+        yield
+    finally:
+        stop_supervisor()
+
+
+app = FastAPI(title="Autonomous Data Migration Control Tower", lifespan=_lifespan)
 
 # Day 10 hardening: was allow_origins=["*"] — any origin could call this
 # API from a signed-in browser. Restricted to explicitly configured UI

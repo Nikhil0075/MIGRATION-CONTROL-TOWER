@@ -182,6 +182,26 @@ estate exists.
 ### 4. Run it
 
 ```bash
+python data-migration-control-tower/run_ui.py
+```
+
+That is the only command an operator runs. The console publishes a durable
+Pub/Sub command for every action, and the event consumers run inside the
+same process — assessment, migration, retry, approval and cutover are all
+initiated *and completed* from the browser. **System Health → Event
+consumers** shows the eight consumers, who holds the worker lease, and lets
+an operator pause or resume any of them.
+
+Two supervisors in one deployment is normal rather than exceptional
+(`uvicorn --reload` runs a reloader parent and a child; Cloud Run
+autoscales), so consumption is gated on a Firestore lease and the loser
+idles in standby. Set `CONTROL_TOWER_WORKERS=0` for a console-only
+process — the deployed image does exactly that, because it carries neither
+the Discovery fixtures nor the ODBC runtime.
+
+The CLI chain still works and still proves the same thing end to end:
+
+```bash
 make run
 ```
 
@@ -204,9 +224,9 @@ make test
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend | 491 | `make test` |
-| Component (vitest) | 21 | `cd frontend/client && npm test` |
-| Browser (Playwright + axe) | 19 | `cd frontend/client && npm run test:e2e` |
+| Backend | 551 | `make test` |
+| Component (vitest) | 37 | `cd frontend/client && npm test` |
+| Browser (Playwright + axe) | 25 | `cd frontend/client && npm run test:e2e` |
 
 Backend tests run against **live Firestore**, so any test creating a run or a
 registry card must delete it in teardown — a leaked run becomes the console's
@@ -265,7 +285,7 @@ policies/        agent permissions, data classification, wave limits
 frontend/        FastAPI API + Oracle JET console
 simulator/       source estates: WideWorldImporters, Postgres, Oracle corpus
 evaluation/      scenario harness and scale reports
-tests/           491 backend tests
+tests/           551 backend tests
 ```
 
 Detailed day-by-day build history, including what each stage proves and why
@@ -283,6 +303,13 @@ Stated plainly rather than discovered later:
   Postgres-to-BigQuery load has run.
 - **Secret Manager is unproven live.** Local runs use the documented environment
   fallback, and `health_check` says so explicitly.
+- **Workers are in-process, not a managed runtime.** The consumers run as
+  threads inside the API process behind a Firestore lease. That is the rung
+  below the production shape (Cloud Run + Eventarc push subscriptions), and
+  it is not a pretence of being it: no subscription has a dead-letter
+  policy, and Pub/Sub caps a message's outstanding lifetime near an hour
+  regardless of lease extensions, so a handler exceeding that will be
+  redelivered and re-run.
 - **The data plane is in-process.** `DataPlaneExecutor` is a real interface with
   one in-memory implementation; a Dataflow-backed executor is not attempted.
 - **Scale figures are bounded.** The harness measures 100-500 synthetic

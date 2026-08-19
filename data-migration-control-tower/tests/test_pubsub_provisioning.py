@@ -120,3 +120,41 @@ def test_every_declared_topic_exists_in_the_project():
         f"declared but absent from project {project!r}: {missing}. "
         f"Re-run infrastructure/gcp_setup.sh — it is idempotent."
     )
+
+
+# ---------------------------------------------------------------------------
+# The supervisor's consumer set (Day 11 Phase 10)
+# ---------------------------------------------------------------------------
+
+
+def test_every_supervisor_consumer_has_a_provisioned_subscription():
+    """The same drift class that broke assessments, one layer up.
+
+    A ConsumerSpec naming a subscription that gcp_setup.sh never creates
+    fails at RUNTIME, inside a background thread, as a repeating pull
+    error the operator sees only as a consumer stuck in `error`. Catching
+    it statically is the difference between a failing test and a console
+    that quietly never does anything.
+    """
+    from tools.worker_supervisor import default_specs
+
+    declared = set(_declared_subscriptions())
+    missing = sorted(
+        f"{spec.name} -> {spec.subscription}"
+        for spec in default_specs()
+        if spec.subscription not in declared
+    )
+    assert not missing, f"consumers bound to subscriptions gcp_setup.sh never creates: {missing}"
+
+
+def test_the_supervisor_does_not_consume_validation_passed():
+    """Pinned here as well as in test_worker_supervisor.py, because this
+    file is what a person reads when adding a subscription — and adding
+    the obvious-looking missing consumer is exactly the mistake.
+    `advance_through_validation` consumes validation-passed-sub as an
+    assertion that the event reached the wire; a second consumer would
+    steal it and hang make run / make harness / evaluation/scenarios.py
+    whenever the console is up."""
+    from tools.worker_supervisor import default_specs
+
+    assert "validation-passed-sub" not in {spec.subscription for spec in default_specs()}
