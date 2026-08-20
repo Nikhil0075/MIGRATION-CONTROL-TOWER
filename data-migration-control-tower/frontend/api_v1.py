@@ -321,6 +321,32 @@ EXECUTION_STAGES = [
 ]
 ASSESSMENT_STAGES = EXECUTION_STAGES[:5]
 VALIDATION_FAILURE_STAGES = {"FAILED", "INVESTIGATING", "REMEDIATING"}
+
+#: A run writes its catalog when it reaches DISCOVERED. Anything earlier
+#: has no tables, no pipelines and no dependencies to draw.
+CATALOGUED_STATES = set(EXECUTION_STAGES[EXECUTION_STAGES.index("DISCOVERED") :]) | VALIDATION_FAILURE_STAGES
+
+
+def _latest_run_with_catalog(runs: list[dict]) -> dict | None:
+    """The newest run that actually got far enough to have lineage.
+
+    `_latest_run` returns the newest run FULL STOP, which is the wrong
+    thing to draw a graph from: a queued run has no catalog, so the page
+    rendered an empty graph and looked broken. Observed live — the newest
+    run for every estate was REQUESTED, so Lineage was blank for all of
+    them unless a run_id was passed by hand, which the UI never did.
+
+    Decided from the run document alone. `state_history` is consulted as
+    well as `state` because a run that reached DISCOVERED and later failed
+    still has a catalog worth showing.
+    """
+    for run in runs:
+        if run.get("state") in CATALOGUED_STATES:
+            return run
+        history = {entry.get("state") for entry in (run.get("state_history") or [])}
+        if "DISCOVERED" in history:
+            return run
+    return None
 STAGE_LABELS = {
     "REQUESTED": "Request queued",
     "DISCOVERED": "Source metadata discovered",
@@ -1308,9 +1334,22 @@ def lineage(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         authorize_estate(user, selected_run.get("estate_id") or DEFAULT_ESTATE_ID, "viewer")
-    selected = run_id or ((_latest_run(_all_runs(50, estate_id=estate_id)) or {}).get("run_id"))
+    # Widened from 50: the recency window can be filled entirely by queued
+    # runs — 29 consecutive REQUESTED assessments were observed on one
+    # estate — and a graph that exists but sits outside the window is
+    # indistinguishable to a reader from no graph at all.
+    candidates = _all_runs(200, estate_id=estate_id)
+    selected = run_id or ((_latest_run_with_catalog(candidates) or {}).get("run_id"))
+    # Offered so the page can say WHICH run it drew and let an operator
+    # pick another, rather than silently choosing one.
+    available = [
+        {"run_id": run.get("run_id"), "state": run.get("state"), "created_at": run.get("created_at")}
+        for run in candidates
+        if run.get("state") in CATALOGUED_STATES
+        or "DISCOVERED" in {entry.get("state") for entry in (run.get("state_history") or [])}
+    ][:25]
     if not selected:
-        return _envelope({"run_id": None, "nodes": [], "edges": []})
+        return _envelope({"run_id": None, "nodes": [], "edges": [], "available_runs": available})
     tables = _collection_docs(selected, "catalog")
     pipelines = _collection_docs(selected, "pipelines")
     dependencies = _collection_docs(selected, "dependencies")
@@ -1335,7 +1374,9 @@ def lineage(
         }
         for item in dependencies
     ]
-    return _envelope({"run_id": selected, "nodes": nodes, "edges": edges})
+    return _envelope(
+        {"run_id": selected, "nodes": nodes, "edges": edges, "available_runs": available}
+    )
 
 
 @router.get("/reconciliation", response_model=Envelope)

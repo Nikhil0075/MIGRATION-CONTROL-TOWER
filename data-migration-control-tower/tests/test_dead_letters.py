@@ -578,3 +578,60 @@ def test_the_approvals_endpoint_cannot_approve_anything():
     source = inspect.getsource(api_v1.approvals)
     for forbidden in ("approval_service.approve", "transition_state", ".set(", ".update("):
         assert forbidden not in source, f"the approvals view must not mutate: found {forbidden!r}"
+
+
+# ---------------------------------------------------------------------------
+# Lineage run selection
+# ---------------------------------------------------------------------------
+
+
+def test_lineage_skips_queued_runs_and_picks_one_with_a_catalog():
+    """The defect this replaced: Lineage drew `_latest_run` — the newest
+    run FULL STOP — which is normally a queued one with no catalog, so the
+    graph rendered empty and the page read as broken. Observed live with 29
+    consecutive REQUESTED runs on one estate.
+    """
+    from frontend.api_v1 import _latest_run, _latest_run_with_catalog
+
+    runs = [
+        {"run_id": "queued-3", "state": "REQUESTED", "state_history": [{"state": "REQUESTED"}]},
+        {"run_id": "queued-2", "state": "REQUESTED", "state_history": [{"state": "REQUESTED"}]},
+        {"run_id": "queued-1", "state": "REQUESTED", "state_history": [{"state": "REQUESTED"}]},
+        {"run_id": "has-data", "state": "COMPLETE", "state_history": [{"state": "DISCOVERED"}]},
+    ]
+
+    assert _latest_run(runs)["run_id"] == "queued-3"
+    assert _latest_run_with_catalog(runs)["run_id"] == "has-data"
+
+
+def test_a_run_that_discovered_then_failed_still_has_lineage_worth_showing():
+    """Selecting on current state alone would skip it; the catalog it wrote
+    before failing is exactly what an operator wants to look at."""
+    from frontend.api_v1 import _latest_run_with_catalog
+
+    runs = [
+        {
+            "run_id": "failed-after-discovery",
+            "state": "FAILED",
+            "state_history": [{"state": "REQUESTED"}, {"state": "DISCOVERED"}],
+        }
+    ]
+    assert _latest_run_with_catalog(runs)["run_id"] == "failed-after-discovery"
+
+
+def test_no_discovered_run_returns_nothing_rather_than_a_wrong_one():
+    from frontend.api_v1 import _latest_run_with_catalog
+
+    runs = [{"run_id": "queued", "state": "REQUESTED", "state_history": [{"state": "REQUESTED"}]}]
+    assert _latest_run_with_catalog(runs) is None
+
+
+def test_every_catalogued_state_is_a_real_lifecycle_state():
+    """CATALOGUED_STATES is derived from EXECUTION_STAGES; if a state is
+    renamed in run_lifecycle.py the derivation must not silently drift."""
+    from agents.orchestrator.run_lifecycle import _CANONICAL_TRANSITIONS
+    from frontend.api_v1 import CATALOGUED_STATES
+
+    known = set(_CANONICAL_TRANSITIONS) | {"FAILED", "INVESTIGATING", "REMEDIATING"}
+    assert CATALOGUED_STATES <= known, CATALOGUED_STATES - known
+    assert "REQUESTED" not in CATALOGUED_STATES, "a queued run has no catalog"

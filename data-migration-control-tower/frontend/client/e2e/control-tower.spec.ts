@@ -67,7 +67,17 @@ const fixtureByPath: Record<string, unknown> = {
     queued: [], blocked: [], overrides: [], events: [],
   },
   "/api/v1/runs": [{ run_id: "run-live", state: "COMPLETE", mode: "execution", updated_at: generatedAt, progress: { percent: 100, status: "complete", label: "Migration complete" } }],
-  "/api/v1/lineage": { nodes: [{ id: "source.orders", label: "Orders", classification: "PII", confidence: 0.98 }], edges: [] },
+  "/api/v1/lineage": {
+    // The endpoint now reports WHICH run it drew, and offers the runs that
+    // actually have a catalog — a queued run has none.
+    run_id: "run-live",
+    nodes: [{ id: "source.orders", label: "Orders", classification: "PII", confidence: 0.98 }],
+    edges: [],
+    available_runs: [
+      { run_id: "run-live", state: "COMPLETE", created_at: generatedAt },
+      { run_id: "run-older", state: "PASSED", created_at: generatedAt },
+    ],
+  },
   "/api/v1/reconciliation": [{ run_id: "run-live", status: "PASSED", delta: 0, tolerance: 0 }],
   "/api/v1/policies": { decisions: [{ policy_id: "cutover-approval", decision: "ALLOW", acting_identity: "approver@example.test" }], approvals: [] },
   // Real registry shape: the ids the seeds actually publish, and APPROVED,
@@ -692,4 +702,22 @@ test("the loading screen holds attention with facts, not invented progress", asy
   expect(text).not.toMatch(/\d+\s*%/);
 
   await page.screenshot({ path: "test-results/loading-state.png" });
+});
+
+
+test("lineage names the run it drew and lets an operator pick another", async ({ page }) => {
+  // It used to draw the newest run FULL STOP, which is normally queued and
+  // has no catalog — so the graph came up empty and read as broken.
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/lineage");
+  await expect(page.getByRole("heading", { name: "Lineage", exact: true })).toBeVisible();
+
+  // The run is stated, not implied.
+  await expect(page.getByText(/run run-live/)).toBeVisible();
+
+  // And only runs that have a catalog are offered.
+  const picker = page.getByLabel("Lineage run");
+  await expect(picker).toBeVisible();
+  await expect(picker.locator("option")).toHaveCount(2);
 });

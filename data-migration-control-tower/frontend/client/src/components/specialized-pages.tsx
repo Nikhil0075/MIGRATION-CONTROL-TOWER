@@ -17,8 +17,20 @@ import {
 type RecordRow = Record<string, any>;
 
 export function LineagePage(props: PageProps) {
-  const state = useResource<RecordRow>(estatePath("/api/v1/lineage", props.activeEstateId));
+  // Which run is drawn is now an explicit choice rather than an implicit
+  // one. The endpoint picks the newest run that actually HAS a catalog;
+  // this lets an operator override that, and — just as important — see
+  // which run they are looking at. It previously drew the newest run full
+  // stop, which is usually a queued one with nothing in it, so the page
+  // rendered an empty graph and read as broken.
+  const [runId, setRunId] = useState<string>("");
+  const basePath = estatePath("/api/v1/lineage", props.activeEstateId);
+  const path = runId
+    ? `${basePath}${basePath.includes("?") ? "&" : "?"}run_id=${encodeURIComponent(runId)}`
+    : basePath;
+  const state = useResource<RecordRow>(path);
   const [filter, setFilter] = useState("ALL");
+  const availableRuns: any[] = state.data?.available_runs || [];
   const edges = state.data?.edges || [];
   const nodes = (state.data?.nodes || []).filter(
     (node: any) =>
@@ -33,16 +45,31 @@ export function LineagePage(props: PageProps) {
         description="Asset relationships, provenance and impact evidence."
         generatedAt={state.generatedAt}
         actions={
-          <select
-            value={filter}
-            onChange={(event) => setFilter(event.currentTarget.value)}
-            aria-label="Filter lineage"
-          >
-            <option>ALL</option>
-            <option>PII</option>
-            <option>METADATA</option>
-            <option>PIPELINE</option>
-          </select>
+          <>
+            {availableRuns.length > 0 && (
+              <select
+                value={runId || state.data?.run_id || ""}
+                onChange={(event) => setRunId(event.currentTarget.value)}
+                aria-label="Lineage run"
+              >
+                {availableRuns.map((run: any) => (
+                  <option key={run.run_id} value={run.run_id}>
+                    {run.run_id} · {run.state}
+                  </option>
+                ))}
+              </select>
+            )}
+            <select
+              value={filter}
+              onChange={(event) => setFilter(event.currentTarget.value)}
+              aria-label="Filter lineage"
+            >
+              <option>ALL</option>
+              <option>PII</option>
+              <option>METADATA</option>
+              <option>PIPELINE</option>
+            </select>
+          </>
         }
       />
       <PageState loading={state.loading} error={state.error} />
@@ -50,7 +77,11 @@ export function LineagePage(props: PageProps) {
         <div class="lineage-layout">
           <Panel
             title="Lineage graph"
-            subtitle={`${nodes.length} visible nodes · ${edges.length} relationships`}
+            subtitle={
+              state.data.run_id
+                ? `${nodes.length} visible nodes · ${edges.length} relationships · run ${state.data.run_id}`
+                : "No run in this estate has been discovered yet, so there is nothing to draw."
+            }
             className="lineage-panel"
           >
             <div class="lineage-canvas" role="list" aria-label="Lineage assets">
