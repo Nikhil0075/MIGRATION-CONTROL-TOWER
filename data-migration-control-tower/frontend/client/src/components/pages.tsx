@@ -532,6 +532,34 @@ export function DataTable({
   );
 }
 
+/** Says why an operator action is unavailable when no estate is active.
+ *
+ * A disabled button with no explanation sends an operator looking for a
+ * permission problem they do not have. All three operator forms posted
+ * `estate_id: activeEstateId` — null until /api/v1/estates resolves, and
+ * permanently null for a user with no estates — and the API answered with
+ * a raw validation error. Runs at least refused to submit; Waves and
+ * Assessments sent it. None of the three said anything.
+ *
+ * Rendered next to the action rather than inside its dialog: the dialog
+ * cannot be opened while the button is disabled, so a message in there is
+ * a message nobody reads.
+ */
+export function NoEstateNotice({
+  activeEstateId,
+  action,
+}: {
+  activeEstateId?: string | null;
+  action: string;
+}) {
+  if (activeEstateId) return null;
+  return (
+    <div class="inline-alert warning" role="status">
+      Select an estate before {action}.
+    </div>
+  );
+}
+
 export function ActionForm({
   title,
   description,
@@ -898,7 +926,7 @@ function AssessmentsPage(props: PageProps) {
             <ActionForm
               title="Start assessment"
               description={`Start an assessment with ${packId}.`}
-              disabled={!canOperate || !packId}
+              disabled={!canOperate || !packId || !props.activeEstateId}
               onSubmit={async (justification) => {
                 const result = await api("/api/v1/assessments", {
                   method: "POST",
@@ -917,6 +945,7 @@ function AssessmentsPage(props: PageProps) {
           </div>
         }
       />
+      <NoEstateNotice activeEstateId={props.activeEstateId} action="starting an assessment" />
       <PageState loading={state.loading} error={state.error} />
       {state.data && (
         <div class="workspace-grid">
@@ -996,8 +1025,11 @@ function WavesPage(props: PageProps) {
             </select>
             <ActionForm
               title="Apply override"
+              // An override holds or opens ONE estate's waves, so there is
+              // nothing sensible to do without one. NoEstateNotice below
+              // carries the reason.
               description={`Apply ${overrideState} to ${sourceId}.`}
-              disabled={!canOperate || !sourceId}
+              disabled={!canOperate || !sourceId || !props.activeEstateId}
               onSubmit={async (justification) => {
                 const result = await api(
                   `/api/v1/waves/${encodeURIComponent(sourceId)}/override`,
@@ -1019,6 +1051,7 @@ function WavesPage(props: PageProps) {
           </div>
         }
       />
+      <NoEstateNotice activeEstateId={props.activeEstateId} action="applying an override" />
       <PageState loading={state.loading} error={state.error} />
       {state.data && (
         <>
@@ -1124,7 +1157,9 @@ function RunsPage(props: PageProps) {
     (option) => `${option.source_id}::${option.pack_id}` === selectedExecution,
   );
   const readinessLoading = Boolean(props.activeEstateId && !props.activeEstate);
-  const disabledReason = readinessLoading
+  const disabledReason = !props.activeEstateId
+    ? "Select an estate before starting a migration."
+    : readinessLoading
     ? "Loading execution readiness…"
     : !canOperate
       ? "Operator permission is required."
@@ -1158,7 +1193,7 @@ function RunsPage(props: PageProps) {
             <ActionForm
               title="Start migration"
               description={selected ? `Start ${selected.pack_id} on ${selected.source_id}.` : disabledReason || "Start the selected Migration Pack."}
-              disabled={Boolean(disabledReason) || !props.activeEstateId}
+              disabled={Boolean(disabledReason)}
               onSubmit={async (justification) => {
                 return api("/api/v1/runs", {
                   method: "POST",

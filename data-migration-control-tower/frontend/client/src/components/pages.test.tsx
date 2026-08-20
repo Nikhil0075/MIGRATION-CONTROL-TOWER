@@ -486,3 +486,72 @@ describe("the loading screen while waiting", () => {
     );
   });
 });
+
+describe("no estate selected", () => {
+  // `activeEstateId` is null until /api/v1/estates resolves, and stays
+  // null for a user with no estates. Three operator forms posted it
+  // straight into the request body as `estate_id: null`, which the API
+  // rejected with a raw type error, because a pydantic default applies
+  // only when the key is missing. Runs already refused to submit; Waves
+  // and Assessments did not.
+  const readyEstate = {
+    estate_id: "sql-estate",
+    display_name: "SQL Estate",
+    status: "ACTIVE",
+    sources: [{ source_id: "primary", adapter: "sqlserver", pack_id: "wwi_sqlserver_v1" }],
+    pipeline_options: [],
+    execution_readiness: {
+      status: "ready" as const,
+      options: [{ source_id: "primary", pack_id: "wwi_sqlserver_v1", label: "Primary SQL · WWI" }],
+      blockers: [],
+    },
+  };
+
+  it.each([
+    ["waves", "Apply override", "Select an estate before applying an override."],
+    ["assessments", "Start assessment", "Select an estate before starting an assessment."],
+    ["runs", "Start migration", "Select an estate before starting a migration."],
+  ])(
+    "%s refuses to submit an action with no estate to apply it to",
+    async (route, action, reason) => {
+      mockApi({
+        "/api/v1/waves": { state: { running_by_source: {} }, overrides: [] },
+        "/api/v1/assessments": { packs: [{ pack_id: "wwi_sqlserver_v1", version: 1 }], runs: [] },
+        "/api/v1/runs": [],
+      });
+      render(
+        <PageRouter
+          {...operatorProps}
+          route={route}
+          activeEstateId={null}
+          activeEstate={readyEstate}
+        />,
+      );
+      const button = (await screen.findByRole("button", { name: action })) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      // Disabled is not enough on its own — it has to say why, or the
+      // operator is left looking for a permission problem they do not
+      // have. Asserted on the PAGE, not inside the action dialog: a
+      // disabled button cannot open its dialog, so a reason written there
+      // is a reason nobody can read. That is where it was first put.
+      expect(screen.getByText(reason)).toBeTruthy();
+    },
+  );
+
+  it("enables the same actions once an estate is active", async () => {
+    mockApi({
+      "/api/v1/waves": { state: { running_by_source: {} }, overrides: [] },
+      "/api/v1/assessments": { packs: [{ pack_id: "wwi_sqlserver_v1", version: 1 }], runs: [] },
+    });
+    render(
+      <PageRouter
+        {...operatorProps}
+        route="waves"
+        activeEstateId="sql-estate"
+        activeEstate={readyEstate}
+      />,
+    );
+    const button = (await screen.findByRole("button", { name: "Apply override" })) as HTMLButtonElement;
+    await vi.waitFor(() => expect(button.disabled).toBe(false));
+  });
+});

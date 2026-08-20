@@ -14,11 +14,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar, copy_context
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 from agents.orchestrator.run_lifecycle import RUN_COLLECTION, get_run, transition_state
 from frontend.operations import get_operation, queue_operation, record_wave_override
@@ -103,11 +103,44 @@ class ProgressSnapshot(BaseModel):
     last_observed_at: str
 
 
+def _reject_null_estate(value: Any) -> Any:
+    """`null` is not the same as absent, and must not be treated as it.
+
+    Pydantic applies a field default only when the KEY IS MISSING. A body
+    carrying `"estate_id": null` therefore skips the default and fails
+    type validation with "Input should be a valid string" — a 422 that
+    tells an operator nothing about what to do. The console sends exactly
+    that shape: three forms post `estate_id: activeEstateId`, and that is
+    null until `/api/v1/estates` resolves, and permanently null for a
+    user with no estates.
+
+    Rejected rather than defaulted, deliberately. An explicit null means
+    the caller had no estate selected; quietly applying an operator
+    action — a hold, an assessment, a migration — to the demo estate
+    instead is a worse outcome than refusing it. Reads may be unscoped
+    and are filtered to the caller's grant; a WRITE always belongs to
+    exactly one estate, so there is no unscoped default to fall back on.
+    """
+    if value is None:
+        raise ValueError(
+            "No estate is selected. This action applies to exactly one estate, "
+            "so estate_id must name it."
+        )
+    return value
+
+
+#: The compatibility default stays for callers that OMIT the field. It is
+#: the explicit null that is refused.
+EstateIdField = Annotated[
+    str,
+    BeforeValidator(_reject_null_estate),
+    Field(default=DEFAULT_ESTATE_ID, min_length=2, max_length=100),
+]
+
+
 class StartAssessmentRequest(BaseModel):
     pack_id: str = Field(min_length=2, max_length=100)
-    # Compatibility default for one release; the Redwood client always
-    # sends its selected estate explicitly.
-    estate_id: str = Field(default=DEFAULT_ESTATE_ID, min_length=2, max_length=100)
+    estate_id: EstateIdField
     justification: str = Field(min_length=8, max_length=2000)
 
 
@@ -118,7 +151,7 @@ class StartRunRequest(BaseModel):
     # Deprecated compatibility alias for one release. New callers send
     # pack_id; disagreement is rejected instead of silently picking one.
     execution_profile: str | None = Field(default=None, min_length=2, max_length=100)
-    estate_id: str = Field(default=DEFAULT_ESTATE_ID, min_length=2, max_length=100)
+    estate_id: EstateIdField
     justification: str = Field(min_length=8, max_length=2000)
 
 
@@ -195,7 +228,7 @@ class WaveOverrideRequest(BaseModel):
     state: Literal["HOLD", "OPEN"]
     justification: str = Field(min_length=8, max_length=2000)
     expires_at: str | None = None
-    estate_id: str = Field(default=DEFAULT_ESTATE_ID, min_length=2, max_length=100)
+    estate_id: EstateIdField
 
 
 class ApproveV1Request(BaseModel):

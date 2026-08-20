@@ -524,3 +524,75 @@ def test_released_css_defines_the_theme_variables():
     assert match, "no usable :root rule in the release stylesheet"
     for variable in ("--mct-red", "--mct-ink", "--mct-surface", "--mct-canvas"):
         assert variable in match.group(1), f"{variable} missing from :root"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("post", "/api/v1/assessments", {"pack_id": "wwi_sqlserver_v1"}),
+        ("post", "/api/v1/runs", {"source_id": "wwi-sqlserver", "pack_id": "wwi_sqlserver_v1"}),
+        ("put", "/api/v1/waves/wwi-demo-estate:wwi-sqlserver/override", {"state": "HOLD"}),
+    ],
+)
+def test_an_explicit_null_estate_is_refused_with_a_reason_an_operator_can_act_on(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: dict
+) -> None:
+    """`null` is not `absent`, and the difference was invisible to the operator.
+
+    A pydantic field default applies only when the KEY IS MISSING, so a
+    body carrying `"estate_id": null` skipped the default and failed type
+    validation with "Input should be a valid string". The console sends
+    exactly that shape — three forms post the active estate, which is
+    null until /api/v1/estates resolves — so the most likely first click
+    after a cold load produced a 422 that named a type, not a fix.
+    """
+    _claims(monkeypatch, "operator")
+    monkeypatch.setattr(
+        "frontend.api_v1.queue_operation",
+        lambda **_kwargs: {"operation_id": "op", "status": "published", "message_id": "m"},
+    )
+    response = getattr(client, method)(
+        path,
+        headers=_headers(**{"Idempotency-Key": f"null-estate-{path}"}),
+        json={**body, "estate_id": None, "justification": "Checking the null estate path"},
+    )
+    assert response.status_code == 422
+    message = " ".join(error["msg"] for error in response.json()["detail"])
+    assert "No estate is selected" in message
+    assert "estate_id" in message
+    # The old failure said this and nothing else. It is a type complaint,
+    # not an instruction.
+    assert "Input should be a valid string" not in message
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("post", "/api/v1/assessments", {"pack_id": "wwi_sqlserver_v1"}),
+        ("put", "/api/v1/waves/wwi-demo-estate:wwi-sqlserver/override", {"state": "HOLD"}),
+    ],
+)
+def test_omitting_the_estate_still_falls_back_to_the_default(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: dict
+) -> None:
+    """The compatibility default is for callers that leave the field out.
+
+    Refusing an explicit null must not also break a caller that never
+    sent the field — that is a different contract, and existing callers
+    depend on it.
+    """
+    _claims(monkeypatch, "operator")
+    captured: dict = {}
+
+    def fake_queue_operation(**kwargs):
+        captured.update(kwargs)
+        return {"operation_id": "op", "status": "published", "message_id": "m"}
+
+    monkeypatch.setattr("frontend.api_v1.queue_operation", fake_queue_operation)
+    monkeypatch.setattr("frontend.api_v1.record_wave_override", lambda **_kwargs: {})
+    response = getattr(client, method)(
+        path,
+        headers=_headers(**{"Idempotency-Key": f"absent-estate-{path}"}),
+        json={**body, "justification": "Checking the absent estate path"},
+    )
+    assert response.status_code == 202
