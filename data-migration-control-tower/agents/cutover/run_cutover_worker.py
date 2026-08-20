@@ -97,7 +97,11 @@ def handle_cutover_approved(payload: dict) -> dict:
                 "result": result,
                 "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                 **(
-                    {}
+                    # Cleared on success for the same reason as the
+                    # assessment handler: a redelivered operation that
+                    # failed once and later completed would otherwise stay
+                    # "done" with the earlier attempt's error attached.
+                    {"error": None}
                     if completed
                     else {
                         "error": (

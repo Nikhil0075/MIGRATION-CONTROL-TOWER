@@ -68,6 +68,12 @@ def handle_assessment_requested(payload: dict) -> dict:
                 {
                     "status": "done",
                     "result": {"run_id": report["run_id"], "pack_id": report["pack_id"]},
+                    # Cleared, not left behind. Pub/Sub redelivers, so an
+                    # operation that fails and later succeeds would
+                    # otherwise keep the earlier attempt's error attached
+                    # and read as "done, connection timeout expired" —
+                    # observed live on a real operation.
+                    "error": None,
                     "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                 }
             )

@@ -635,3 +635,53 @@ def test_every_catalogued_state_is_a_real_lifecycle_state():
     known = set(_CANONICAL_TRANSITIONS) | {"FAILED", "INVESTIGATING", "REMEDIATING"}
     assert CATALOGUED_STATES <= known, CATALOGUED_STATES - known
     assert "REQUESTED" not in CATALOGUED_STATES, "a queued run has no catalog"
+
+
+# ---------------------------------------------------------------------------
+# Operation records after a retry
+# ---------------------------------------------------------------------------
+
+
+def test_a_succeeded_operation_does_not_keep_the_previous_attempt_s_error(monkeypatch):
+    """Pub/Sub redelivers, so an operation can fail and then succeed.
+
+    Seen live: an assessment operation read `status: done` with
+    `error: "connection timeout expired"` still attached, because the
+    success branch wrote status and result but never cleared the error the
+    failed attempt left behind.
+    """
+    from agents.discovery import run_assessment_worker as worker
+
+    written: list[dict] = []
+
+    class FakeRef:
+        def set(self, data, merge=False):
+            written.append(dict(data))
+
+        def update(self, data):
+            written.append(dict(data))
+
+    class FakeCollection:
+        def document(self, _id):
+            return FakeRef()
+
+    class FakeClient:
+        def collection(self, _name):
+            return FakeCollection()
+
+    monkeypatch.setattr(worker, "get_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        worker,
+        "run_assessment",
+        lambda *a, **kw: {"run_id": "run-1", "pack_id": "pack-1"},
+    )
+
+    worker.handle_assessment_requested(
+        {"operation_id": "op-1", "pack_path": "packs/x/pack.yaml", "estate_id": "e"}
+    )
+
+    done = [record for record in written if record.get("status") == "done"]
+    assert done, "the operation was never marked done"
+    assert "error" in done[-1] and done[-1]["error"] is None, (
+        "a succeeded operation must clear the failed attempt's error"
+    )
