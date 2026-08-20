@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, BeforeValidator, Field
 
 from agents.orchestrator.run_lifecycle import RUN_COLLECTION, get_run, transition_state
@@ -235,8 +236,28 @@ class ApproveV1Request(BaseModel):
     justification: str = Field(min_length=5, max_length=2000)
 
 
+class CreateReportRequest(BaseModel):
+    report_type: Literal["assessment", "run_evidence", "reconciliation", "approval_audit"]
+    run_id: str = Field(min_length=2, max_length=160)
+    justification: str = Field(min_length=8, max_length=2000)
+
+
+class AssistantSessionRequest(BaseModel):
+    estate_id: EstateIdField
+    route: str = Field(default="/overview", min_length=1, max_length=300)
+    run_id: str | None = Field(default=None, max_length=160)
+
+
+class AssistantMessageRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+
+
 def _now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _feature_enabled(name: str) -> bool:
+    return os.environ.get(name, "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _envelope(data: Any, *, total: int | None = None, next_cursor: str | None = None) -> dict:
@@ -992,6 +1013,11 @@ def runtime_config() -> dict:
             "environment": os.environ.get("APP_ENVIRONMENT") or os.environ.get("ENVIRONMENT") or "Local",
             "firebase": firebase_config,
             "authentication_configured": bool(firebase_config),
+            "features": {
+                "agent_reasoning": os.environ.get("ENABLE_AGENT_REASONING_V2", "0").lower() in {"1", "true", "yes", "on"},
+                "reports": os.environ.get("ENABLE_REPORTS", "0").lower() in {"1", "true", "yes", "on"},
+                "assistant": os.environ.get("ENABLE_AI_ASSISTANT", "0").lower() in {"1", "true", "yes", "on"},
+            },
         }
     )
 
@@ -1686,6 +1712,8 @@ def run_detail(run_id: str, user: UserContext = Depends(get_user_context)) -> di
         "monitoring",
         "risk_findings",
         "containment_events",
+        "agent_execution_events",
+        "agent_artifacts",
     )
     detail = {name: _collection_docs(run_id, name) for name in collections}
     return _envelope({"run": _attach_progress(run), **detail})
@@ -1822,7 +1850,101 @@ def agents(
     for run in _all_runs(200, estate_id=estate_id):
         for agent_id in (run.get("pinned_agents") or {}):
             pinned[agent_id] = pinned.get(agent_id, 0) + 1
-    return _envelope({"cards": cards, "pinned_run_counts": pinned}, total=len(cards))
+    events = _subcollection_group("agent_execution_events", {run["run_id"] for run in _all_runs(200, estate_id=estate_id)})
+    flat_events = [
+        {"run_id": run_id, **event}
+        for run_id, values in events.items()
+        for event in values
+    ]
+    durations = sorted(int(event.get("duration_ms") or 0) for event in flat_events if event.get("duration_ms") is not None)
+    # Early audit records predate the structured token object and may carry
+    # a textual ``token_usage`` marker. They remain valid audit evidence but
+    # must not break the whole Agents page or be mispriced as token counts.
+    token_usage = [
+        usage
+        for event in flat_events
+        if isinstance((usage := event.get("token_usage")), dict)
+    ]
+    completed_count = sum(1 for event in flat_events if event.get("status") == "COMPLETED")
+    fallback_count = sum(1 for event in flat_events if event.get("fallback_used"))
+    model_usage_events = [
+        {
+            "kind": "model",
+            "model": event.get("model"),
+            "input_tokens": event["token_usage"].get("input_tokens"),
+            "output_tokens": event["token_usage"].get("output_tokens"),
+            "thinking_tokens": event["token_usage"].get("thinking_tokens"),
+        }
+        for event in flat_events
+        if event.get("model") and isinstance(event.get("token_usage"), dict)
+    ]
+    from tools.usage_meter import price_usage
+
+    priced_model_usage = price_usage(model_usage_events) if model_usage_events else None
+    aggregates = {
+        "total_executions": len(flat_events),
+        "completed": completed_count,
+        "failed": sum(1 for event in flat_events if event.get("status") == "FAILED"),
+        "fallbacks": fallback_count,
+        "success_rate": round(completed_count / len(flat_events) * 100, 1) if flat_events else None,
+        "fallback_rate": round(fallback_count / len(flat_events) * 100, 1) if flat_events else None,
+        "model_executions": sum(1 for event in flat_events if event.get("model")),
+        "p50_latency_ms": int(statistics.median(durations)) if durations else None,
+        "p95_latency_ms": durations[min(len(durations) - 1, math.ceil(len(durations) * .95) - 1)] if durations else None,
+        "input_tokens": sum(int(item.get("input_tokens") or 0) for item in token_usage),
+        "output_tokens": sum(int(item.get("output_tokens") or 0) for item in token_usage),
+        "thinking_tokens": sum(int(item.get("thinking_tokens") or 0) for item in token_usage),
+        "estimated_model_cost": priced_model_usage,
+    }
+    flat_events.sort(key=lambda item: item.get("completed_at") or item.get("recorded_at") or "", reverse=True)
+    return _envelope({
+        "cards": cards, "pinned_run_counts": pinned, "aggregates": aggregates,
+        "recent_executions": flat_events[:25],
+    }, total=len(cards))
+
+
+def _agent_events_for_visible_runs(estate_id: str | None) -> list[dict]:
+    runs = _all_runs(500, estate_id=estate_id)
+    grouped = _subcollection_group("agent_execution_events", {run["run_id"] for run in runs})
+    result = [{"run_id": run_id, **item} for run_id, values in grouped.items() for item in values]
+    result.sort(key=lambda item: item.get("completed_at") or item.get("recorded_at") or "", reverse=True)
+    return result
+
+
+@router.get("/agents/{agent_id}/executions", response_model=Envelope)
+def agent_executions(
+    agent_id: str,
+    estate_id: str | None = Query(default=None),
+    run_id: str | None = None,
+    event_status: str | None = Query(default=None, alias="status"),
+    model: str | None = None,
+    cursor: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    user: UserContext = Depends(require_role("viewer")),
+) -> dict:
+    _authorize_read(user, estate_id)
+    items = [event for event in _agent_events_for_visible_runs(estate_id) if event.get("agent_id") == agent_id]
+    if run_id:
+        items = [event for event in items if event.get("run_id") == run_id]
+    if event_status:
+        items = [event for event in items if event.get("status") == event_status]
+    if model:
+        items = [event for event in items if event.get("model") == model]
+    offset = _decode_cursor(cursor)
+    next_cursor = _encode_cursor(offset + limit) if offset + limit < len(items) else None
+    return _envelope(items[offset:offset + limit], total=len(items), next_cursor=next_cursor)
+
+
+@router.get("/runs/{run_id}/agent-events", response_model=Envelope)
+def run_agent_events(run_id: str, user: UserContext = Depends(get_user_context)) -> dict:
+    try:
+        run = get_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    authorize_estate(user, run.get("estate_id") or DEFAULT_ESTATE_ID, "viewer")
+    items = _collection_docs(run_id, "agent_execution_events")
+    items.sort(key=lambda item: item.get("completed_at") or item.get("recorded_at") or "")
+    return _envelope(items, total=len(items))
 
 
 @router.get("/evaluations", response_model=Envelope)
@@ -1859,6 +1981,19 @@ def system_health(
 def _build_system_health(estate_id: str | None) -> dict:
     client = get_client()
     latest = _latest_run(_all_runs(10, estate_id=estate_id))
+    latest_agent_events = _collection_docs(latest["run_id"], "agent_execution_events") if latest else []
+    model_events = [event for event in latest_agent_events if event.get("model")]
+    model_last_observed = max(
+        (event.get("completed_at") or event.get("recorded_at") or "" for event in model_events),
+        default=None,
+    )
+    required_cards = [
+        doc.to_dict() or {}
+        for doc in client.collection_group("versions").stream()
+        if (doc.to_dict() or {}).get("model_required")
+    ]
+    approved_required = [card for card in required_cards if card.get("status") == "APPROVED"]
+    model_failures = sum(1 for event in model_events if event.get("status") == "FAILED")
     processed = [d.to_dict() or {} for d in client.collection("processed_messages").limit(100).stream()]
     connections = []
     for snapshot in client.collection("connection_health").stream():
@@ -1891,6 +2026,45 @@ def _build_system_health(estate_id: str | None) -> dict:
             "status": "NOT_INSTRUMENTED",
             "last_observed_at": None,
             "detail": "No runtime health snapshot has been recorded.",
+        },
+        {
+            "service": "Vertex AI reasoning",
+            "status": "CONFIGURED" if _feature_enabled("ENABLE_AGENT_REASONING_V2") and os.environ.get("GCP_PROJECT_ID") else "DISABLED",
+            "last_observed_at": model_last_observed,
+            "detail": os.environ.get("AGENT_REASONING_MODEL", "gemini-3.7-flash"),
+        },
+        {
+            "service": "Required-agent readiness",
+            "status": (
+                "READY"
+                if _feature_enabled("ENABLE_AGENT_REASONING_V2") and required_cards and len(approved_required) == len(required_cards)
+                else "DISABLED"
+                if not _feature_enabled("ENABLE_AGENT_REASONING_V2")
+                else "DEGRADED"
+            ),
+            "last_observed_at": model_last_observed,
+            "detail": f"{len(approved_required)}/{len(required_cards)} required model registry versions approved",
+        },
+        {
+            "service": "Model execution telemetry",
+            "status": "STALE" if model_last_observed and _is_stale(model_last_observed) else "OBSERVED" if model_events else "NOT_OBSERVED",
+            "last_observed_at": model_last_observed,
+            "detail": (
+                f"{model_failures}/{len(model_events)} model executions failed "
+                f"({round(model_failures / len(model_events) * 100, 1) if model_events else 0}%)"
+            ),
+        },
+        {
+            "service": "Report storage",
+            "status": "CONFIGURED" if _feature_enabled("ENABLE_REPORTS") and os.environ.get("REPORTS_BUCKET") else "DISABLED",
+            "last_observed_at": None,
+            "detail": "Private Cloud Storage bucket configured" if os.environ.get("REPORTS_BUCKET") else "REPORTS_BUCKET is not configured",
+        },
+        {
+            "service": "AI assistant",
+            "status": "CONFIGURED" if _feature_enabled("ENABLE_AI_ASSISTANT") and os.environ.get("GCP_PROJECT_ID") else "DISABLED",
+            "last_observed_at": None,
+            "detail": os.environ.get("ASSISTANT_MODEL", "gemini-3.5-flash"),
         },
     ]
     services.extend(
@@ -2797,3 +2971,231 @@ def approvals(
         )
 
     return _cached(f"approvals:{estate_id}", _build)
+
+
+# ---------------------------------------------------------------------------
+# Immutable reports
+# ---------------------------------------------------------------------------
+
+
+@router.post("/reports", response_model=Envelope, status_code=status.HTTP_202_ACCEPTED)
+def create_report(
+    body: CreateReportRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    user: UserContext = Depends(require_role("viewer")),
+) -> dict:
+    if not _feature_enabled("ENABLE_REPORTS"):
+        raise HTTPException(status_code=503, detail="Report generation is not enabled on this deployment.")
+    try:
+        run = get_run(body.run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    estate_id = run.get("estate_id") or DEFAULT_ESTATE_ID
+    authorize_estate(user, estate_id, "viewer")
+
+    from frontend.operations import _operation_id, _validated_key
+    from frontend.report_service import generate_background
+
+    try:
+        key = _validated_key(idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    report_id = _operation_id(user.email, f"report:{body.report_type}:{body.run_id}", key)
+    client = get_client()
+    ref = client.collection("report_artifacts").document(report_id)
+    existing = ref.get()
+    if existing.exists:
+        return _envelope({"report_id": report_id, **(existing.to_dict() or {})})
+    now = _now()
+    record = {
+        "report_id": report_id, "report_type": body.report_type, "run_id": body.run_id,
+        "estate_id": estate_id, "status": "queued", "requested_by": user.email,
+        "justification": body.justification, "created_at": now, "updated_at": now,
+        "progress": {"percent": 0, "stage": "queued"},
+    }
+    try:
+        ref.create(record)
+    except Exception as exc:
+        if type(exc).__name__ != "AlreadyExists":
+            raise
+        raced = ref.get()
+        return _envelope({"report_id": report_id, **(raced.to_dict() or record)})
+    client.collection("operation_audit").document(str(__import__("uuid").uuid4())).set({
+        "operation_id": report_id, "kind": "report.generate", "actor": user.email,
+        "estate_id": estate_id, "run_id": body.run_id, "report_type": body.report_type,
+        "justification": body.justification, "event": "queued", "recorded_at": now,
+    })
+    background_tasks.add_task(generate_background, report_id)
+    return _envelope(record)
+
+
+@router.get("/reports/latest", response_model=Envelope)
+def latest_report(
+    run_id: str = Query(min_length=2, max_length=200),
+    report_type: Literal["assessment", "run_evidence", "reconciliation", "approval_audit"] = Query(),
+    user: UserContext = Depends(get_user_context),
+) -> dict:
+    """Restore the most recent authorized artifact after page navigation.
+
+    Report generation is asynchronous and the client may be closed or moved
+    to another route while it runs. Keeping the report id only in component
+    state made completed artifacts effectively disappear from the console.
+    """
+    try:
+        run = get_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    estate_id = run.get("estate_id") or DEFAULT_ESTATE_ID
+    authorize_estate(user, estate_id, "viewer")
+    reports = []
+    for snapshot in get_client().collection("report_artifacts").limit(250).stream():
+        record = snapshot.to_dict() or {}
+        if record.get("run_id") == run_id and record.get("report_type") == report_type:
+            reports.append({"report_id": snapshot.id, **record})
+    reports.sort(
+        key=lambda item: item.get("completed_at") or item.get("created_at") or "",
+        reverse=True,
+    )
+    return _envelope(reports[0] if reports else None)
+
+
+@router.get("/reports/{report_id}", response_model=Envelope)
+def report_status(report_id: str, user: UserContext = Depends(get_user_context)) -> dict:
+    snapshot = get_client().collection("report_artifacts").document(report_id).get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Report not found.")
+    report = {"report_id": snapshot.id, **(snapshot.to_dict() or {})}
+    authorize_estate(user, report.get("estate_id") or DEFAULT_ESTATE_ID, "viewer")
+    # The complete snapshot is available through the authenticated JSON
+    # download; status polling stays compact.
+    report.pop("snapshot", None)
+    return _envelope(report)
+
+
+@router.get("/reports/{report_id}/download")
+def report_download(
+    report_id: str,
+    format: Literal["pdf", "json"] = Query(default="pdf"),
+    user: UserContext = Depends(get_user_context),
+) -> Response:
+    snapshot = get_client().collection("report_artifacts").document(report_id).get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Report not found.")
+    report = {"report_id": snapshot.id, **(snapshot.to_dict() or {})}
+    authorize_estate(user, report.get("estate_id") or DEFAULT_ESTATE_ID, "viewer")
+    if report.get("status") != "ready":
+        raise HTTPException(status_code=409, detail=f"Report is {report.get('status', 'not ready')}.")
+    from frontend.report_service import download
+
+    try:
+        data, content_type, filename = download(report, format)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Report artifact is unavailable: {exc}") from exc
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={
+            # The page fetches this with a Firebase Authorization header and
+            # downloads the resulting Blob. Chromium may perform a separate
+            # security recheck without custom headers; that request must stay
+            # unauthorized rather than weakening artifact RBAC.
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+            "X-Content-SHA256": report.get("pdf_sha256") if format == "pdf" else report.get("json_sha256", report.get("evidence_hash", "")),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Read-only Gemini assistant
+# ---------------------------------------------------------------------------
+
+
+@router.post("/assistant/sessions", response_model=Envelope, status_code=status.HTTP_201_CREATED)
+def assistant_create_session(
+    body: AssistantSessionRequest,
+    user: UserContext = Depends(require_role("viewer")),
+) -> dict:
+    if not _feature_enabled("ENABLE_AI_ASSISTANT"):
+        raise HTTPException(status_code=503, detail="The AI assistant is not enabled on this deployment.")
+    authorize_estate(user, body.estate_id, "viewer")
+    if body.run_id:
+        try:
+            run = get_run(body.run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if (run.get("estate_id") or DEFAULT_ESTATE_ID) != body.estate_id:
+            raise HTTPException(status_code=422, detail="The selected run does not belong to the active estate.")
+    from frontend.assistant_service import create_session
+
+    return _envelope(create_session(
+        uid=user.uid, email=user.email, estate_id=body.estate_id, route=body.route, run_id=body.run_id,
+    ))
+
+
+def _owned_assistant_session(session_id: str, user: UserContext) -> dict:
+    from frontend.assistant_service import get_session
+
+    session_record = get_session(session_id)
+    if not session_record:
+        raise HTTPException(status_code=404, detail="Assistant session not found.")
+    if session_record.get("uid") != user.uid:
+        raise HTTPException(status_code=404, detail="Assistant session not found.")
+    authorize_estate(user, session_record.get("estate_id") or DEFAULT_ESTATE_ID, "viewer")
+    return session_record
+
+
+@router.get("/assistant/sessions/{session_id}", response_model=Envelope)
+def assistant_get_session(session_id: str, user: UserContext = Depends(get_user_context)) -> dict:
+    session_record = _owned_assistant_session(session_id, user)
+    from frontend.assistant_service import MESSAGE_COLLECTION
+    messages = [
+        {"id": snapshot.id, **(snapshot.to_dict() or {})}
+        for snapshot in get_client().collection("assistant_sessions").document(session_id).collection(MESSAGE_COLLECTION).stream()
+    ]
+    messages.sort(key=lambda item: item.get("created_at") or "")
+    return _envelope({**session_record, "messages": messages})
+
+
+@router.post("/assistant/sessions/{session_id}/messages")
+def assistant_message(
+    session_id: str,
+    body: AssistantMessageRequest,
+    user: UserContext = Depends(require_role("viewer")),
+) -> StreamingResponse:
+    if not _feature_enabled("ENABLE_AI_ASSISTANT"):
+        raise HTTPException(status_code=503, detail="The AI assistant is not enabled on this deployment.")
+    session_record = _owned_assistant_session(session_id, user)
+    authorize_estate(user, session_record.get("estate_id") or DEFAULT_ESTATE_ID, "viewer")
+    from frontend.assistant_service import stream_answer
+
+    return StreamingResponse(
+        stream_answer(session=session_record, question=body.question),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.delete("/assistant/sessions/{session_id}", response_model=Envelope)
+def assistant_delete_session(
+    session_id: str,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    user: UserContext = Depends(require_role("viewer")),
+) -> dict:
+    session_record = _owned_assistant_session(session_id, user)
+    authorize_estate(user, session_record.get("estate_id") or DEFAULT_ESTATE_ID, "viewer")
+    from frontend.operations import _validated_key
+    from frontend.assistant_service import delete_session
+
+    try:
+        _validated_key(idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    delete_session(session_id)
+    get_client().collection("operation_audit").document(str(__import__("uuid").uuid4())).set({
+        "kind": "assistant.session.delete", "actor": user.email,
+        "estate_id": session_record.get("estate_id"), "session_id": session_id,
+        "event": "applied", "recorded_at": _now(),
+    })
+    return _envelope({"session_id": session_id, "status": "deleted"})

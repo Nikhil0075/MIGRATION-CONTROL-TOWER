@@ -27,6 +27,13 @@ export async function publicApi<T = unknown>(path: string): Promise<Envelope<T>>
   return (await response.json()) as Envelope<T>;
 }
 
+export async function authenticatedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = await idToken();
+  const headers = new Headers(init.headers || {});
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(path, { ...init, headers });
+}
+
 export function idempotencyKey(prefix: string): string {
   return `${prefix}-${Date.now()}-${crypto.randomUUID()}`;
 }

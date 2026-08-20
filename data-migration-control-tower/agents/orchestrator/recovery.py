@@ -44,7 +44,6 @@ import logging
 import uuid
 
 from tools import memory_bank
-from tools.usage_meter import extract_model_usage, record_model_usage  # noqa: E402
 from tools.firestore_client import get_client
 from tools.migration_executor import execute_migration
 
@@ -107,40 +106,42 @@ def _try_gemini_narrative(
     the recovery loop, only its explanatory text.
     """
     try:
-        import os
+        if not run_id:
+            return None
+        from tools.model_gateway import NarrativeReasoning, generate_structured
 
-        import vertexai
-        from vertexai.generative_models import GenerativeModel
-
-        vertexai.init(project=os.environ["GCP_PROJECT_ID"], location="us-central1")
-        model = GenerativeModel(os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"))
-        evidence = "; ".join(
-            f"{c['check_type']}: source={c.get('source_value')!r} target={c.get('target_value')!r}"
-            for c in failed_checks
+        evidence_refs = [
+            f"reconciliation:{item.get('check_id') or item.get('check_type')}"
+            for item in failed_checks
+        ]
+        result = generate_structured(
+            run_id=run_id,
+            agent_id="orchestrator",
+            capability="recovery.reason.root_cause",
+            stage="INVESTIGATING",
+            instruction=(
+                "Explain the reconciliation failure in two concise sentences without speculation. "
+                "A deterministic clean reload and revalidation remains the only permitted remediation."
+            ),
+            payload={
+                "table": table_ref,
+                "pipelines": pipelines,
+                "failed_checks": [
+                    {
+                        "evidence_ref": evidence_refs[index],
+                        "check_type": item.get("check_type"),
+                        "source_value": item.get("source_value"),
+                        "target_value": item.get("target_value"),
+                    }
+                    for index, item in enumerate(failed_checks)
+                ],
+            },
+            output_schema=NarrativeReasoning,
+            evidence_refs=evidence_refs,
+            tool_calls=[{"tool": "reconciliation.read", "status": "COMPLETED"}],
+            required=False,
         )
-        prompt = (
-            "You are explaining a data migration reconciliation failure to an "
-            "engineer, in two sentences, plain language, no speculation beyond "
-            "the evidence given. Table: "
-            f"{table_ref}. Candidate responsible pipeline(s): {pipelines or 'unknown'}. "
-            f"Failed check evidence: {evidence}."
-        )
-        response = model.generate_content(prompt)
-        # Token counts as the model itself reports them, attributed to
-        # the run that caused the call. Measured, never inferred from
-        # prompt length — a cost derived from a guess is the kind of
-        # invented evidence this project exists not to produce.
-        usage = extract_model_usage(response)
-        if usage:
-            record_model_usage(
-                run_id,
-                model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
-                input_tokens=usage[0],
-                output_tokens=usage[1],
-                purpose="recovery.narrative",
-            )
-        text = (response.text or "").strip()
-        return text or None
+        return result.rationale_summary if result else None
     except Exception as exc:  # noqa: BLE001 — any failure here is non-fatal
         logger.info("Gemini narrative unavailable (%s); using deterministic template.", exc)
         return None

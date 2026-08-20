@@ -2,7 +2,7 @@ import { h } from "preact";
 import { ProgressBar } from "oj-c/progress-bar";
 import { lazy, Suspense } from "preact/compat";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { api, idempotencyKey } from "../api";
+import { api, authenticatedFetch, idempotencyKey } from "../api";
 import { Column, EstateSummary, ProgressSnapshot, Role, Session } from "../models";
 import { formatValue, statusTone } from "../status";
 import { Icon } from "./icons";
@@ -20,6 +20,7 @@ export type PageProps = {
   estateRoles?: Role[];
   onEstateCreated?: (estate: EstateSummary) => void;
   progressPollIntervalMs?: number;
+  features?: { agent_reasoning: boolean; reports: boolean; assistant: boolean };
 };
 
 export function estatePath(path: string, estateId?: string | null): string {
@@ -320,6 +321,119 @@ export function PageHeader({
         )}
         {actions}
       </div>
+    </div>
+  );
+}
+
+function ReportActions({
+  runId,
+  reportType,
+  enabled = true,
+}: {
+  runId?: string | null;
+  reportType: "assessment" | "run_evidence" | "reconciliation" | "approval_audit";
+  enabled?: boolean;
+}) {
+  const [report, setReport] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [restoring, setRestoring] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled || !runId) { setRestoring(false); return; }
+    let active = true;
+    setRestoring(true);
+    setReport(null);
+    setError(null);
+    void api<any>(
+      `/api/v1/reports/latest?run_id=${encodeURIComponent(runId)}&report_type=${encodeURIComponent(reportType)}`,
+    )
+      .then((result) => { if (active && result.data) setReport(result.data); })
+      .catch((reason) => { if (active) setError((reason as Error).message); })
+      .finally(() => { if (active) setRestoring(false); });
+    return () => { active = false; };
+  }, [enabled, runId, reportType]);
+  if (!enabled || !runId) return null;
+
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api<any>("/api/v1/reports", {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey(`report-${reportType}`) },
+        body: JSON.stringify({
+          report_type: reportType,
+          run_id: runId,
+          justification: `Operator requested ${reportType.replaceAll("_", " ")} evidence export.`,
+        }),
+      });
+      let current = result.data;
+      setReport(current);
+      // Live evidence snapshots can span many Firestore subcollections and
+      // private-object uploads. Fifteen seconds (the former 30 × 500 ms)
+      // falsely reported failure while generation was still healthy. Keep a
+      // bounded ten-minute window and show the server's measured 0–100%
+      // progress throughout instead of hammering the status endpoint.
+      for (let attempt = 0; attempt < 300 && !["ready", "failed"].includes(current.status); attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+        current = (await api<any>(`/api/v1/reports/${encodeURIComponent(current.report_id)}`)).data;
+        setReport(current);
+      }
+      if (current.status !== "ready") throw new Error(current.error || "The report did not become ready.");
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function artifact(kind: "pdf" | "json", print = false) {
+    if (!report?.report_id) return;
+    setError(null);
+    try {
+      const response = await authenticatedFetch(`/api/v1/reports/${encodeURIComponent(report.report_id)}/download?format=${kind}`);
+      if (!response.ok) throw new Error("The report artifact is unavailable.");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      if (print) {
+        const frame = document.createElement("iframe");
+        frame.className = "print-frame";
+        frame.title = "Printable report";
+        frame.src = url;
+        frame.onload = () => { frame.contentWindow?.focus(); frame.contentWindow?.print(); window.setTimeout(() => { URL.revokeObjectURL(url); frame.remove(); }, 30_000); };
+        document.body.appendChild(frame);
+      } else {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `migration-control-tower-${reportType}-${runId}.${kind}`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      }
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  return (
+    <div class="report-actions" aria-label={`${reportType.replaceAll("_", " ")} report`}>
+      {restoring ? (
+        <button class="button" type="button" disabled>Checking reports…</button>
+      ) : !report || report.status !== "ready" ? (
+        <button class="button" type="button" disabled={busy} onClick={() => void generate()}>{busy ? "Generating report…" : "Generate report"}</button>
+      ) : (
+        <>
+          <button class="button" type="button" onClick={() => void artifact("pdf", true)}>Print</button>
+          <button class="button" type="button" onClick={() => void artifact("pdf")}>Download PDF</button>
+          <button class="button" type="button" onClick={() => void artifact("json")}>Download JSON</button>
+        </>
+      )}
+      {busy && report?.progress && (
+        <span class="report-progress" role="status">
+          <progress value={report.progress.percent} max={100} aria-label="Report generation progress" />
+          {report.progress.percent}% · {String(report.progress.stage).replaceAll("_", " ")}
+        </span>
+      )}
+      {error && <span class="report-error" role="alert">{error}</span>}
     </div>
   );
 }
@@ -1064,6 +1178,9 @@ function AssessmentsPage(props: PageProps) {
   const [refresh, setRefresh] = useState(0);
   const state = useResource<RecordRow>(estatePath("/api/v1/assessments", props.activeEstateId), refresh);
   const [packId, setPackId] = useState("");
+  const [selectedAssessment, setSelectedAssessment] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("run_id"),
+  );
   const canOperate = (props.estateRoles || props.session.roles).includes("operator");
   useEffect(() => {
     if (!packId && state.data?.packs?.length)
@@ -1110,6 +1227,7 @@ function AssessmentsPage(props: PageProps) {
           </div>
         }
       />
+      <ReportActions runId={selectedAssessment} reportType="assessment" enabled={props.features?.reports} />
       <NoEstateNotice activeEstateId={props.activeEstateId} action="starting an assessment" />
       <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
@@ -1130,7 +1248,7 @@ function AssessmentsPage(props: PageProps) {
                 { key: "created_at", label: "Created" },
                 { key: "last_transition_at", label: "Updated" },
               ]}
-              onRow={(row) => props.onInspect("Assessment report", row)}
+              onRow={(row) => { setSelectedAssessment(row.run_id); props.onInspect("Assessment report", row); }}
             />
           </Panel>
           <Panel title="Migration Packs">
@@ -1495,6 +1613,7 @@ function RunDetailPage(props: PageProps & { runId: string }) {
           </div>
         }
       />
+      <ReportActions runId={props.runId} reportType="run_evidence" enabled={props.features?.reports} />
       <PageState loading={state.loading} error={state.error} status={state.status} />
       {data && (
         <>
@@ -1672,6 +1791,9 @@ function RunDetailPage(props: PageProps & { runId: string }) {
 
 function ReconciliationPage(props: PageProps) {
   const state = useResource<any[]>(estatePath("/api/v1/reconciliation", props.activeEstateId));
+  const [selectedRun, setSelectedRun] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("run_id"),
+  );
   return (
     <>
       <PageHeader
@@ -1679,6 +1801,7 @@ function ReconciliationPage(props: PageProps) {
         description="Cross-run validation deltas, tolerances and immutable evidence."
         generatedAt={state.generatedAt}
       />
+      <ReportActions runId={selectedRun} reportType="reconciliation" enabled={props.features?.reports} />
       <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <Panel title="Validation checks">
@@ -1699,7 +1822,7 @@ function ReconciliationPage(props: PageProps) {
               { key: "tolerance", label: "Tolerance" },
               { key: "checked_at", label: "Checked" },
             ]}
-            onRow={(row) => props.onInspect("Reconciliation evidence", row)}
+            onRow={(row) => { setSelectedRun(row.run_id); props.onInspect("Reconciliation evidence", row); }}
           />
         </Panel>
       )}
@@ -1709,6 +1832,9 @@ function ReconciliationPage(props: PageProps) {
 
 function PoliciesPage(props: PageProps) {
   const state = useResource<RecordRow>(estatePath("/api/v1/policies", props.activeEstateId));
+  const [selectedRun, setSelectedRun] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("run_id"),
+  );
   return (
     <>
       <PageHeader
@@ -1716,6 +1842,7 @@ function PoliciesPage(props: PageProps) {
         description="Deterministic decisions, separation of duties and approval history."
         generatedAt={state.generatedAt}
       />
+      <ReportActions runId={selectedRun} reportType="approval_audit" enabled={props.features?.reports} />
       <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <div class="workspace-grid">
@@ -1731,7 +1858,7 @@ function PoliciesPage(props: PageProps) {
                 { key: "decision", label: "Decision", status: true },
                 { key: "reason", label: "Reason", priority: "secondary" },
               ]}
-              onRow={(row) => props.onInspect("Policy evidence", row)}
+              onRow={(row) => { setSelectedRun(row.run_id); props.onInspect("Policy evidence", row); }}
             />
           </Panel>
           <Panel title="Approval inbox and history">
@@ -1745,7 +1872,7 @@ function PoliciesPage(props: PageProps) {
                 { key: "approved_by", label: "Approver" },
                 { key: "justification", label: "Justification" },
               ]}
-              onRow={(row) => props.onInspect("Approval record", row)}
+              onRow={(row) => { setSelectedRun(row.run_id); props.onInspect("Approval record", row); }}
             />
           </Panel>
         </div>
@@ -1790,17 +1917,38 @@ function latestApprovedPerAgent(cards: RecordRow[]): RecordRow[] {
 
 function AgentsPage(props: PageProps) {
   const state = useResource<RecordRow>(estatePath("/api/v1/agents", props.activeEstateId));
+  const [agentFilter, setAgentFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [modelFilter, setModelFilter] = useState("all");
   const pinnedRunCounts = state.data?.pinned_run_counts || {};
+  const recentExecutions: RecordRow[] = state.data?.recent_executions || [];
+  const filteredExecutions = recentExecutions.filter((event: RecordRow) =>
+    (agentFilter === "all" || event.agent_id === agentFilter)
+    && (statusFilter === "all" || event.status === statusFilter)
+    && (modelFilter === "all" || (event.model || "deterministic") === modelFilter));
+  const filterValues = (key: string, fallback?: string): string[] => [
+    ...new Set<string>(recentExecutions.map((event) => String(event[key] || fallback || "")).filter(Boolean)),
+  ].sort();
   return (
     <>
       <PageHeader
         title="Agents"
-        description="Registry versions, ownership, capabilities and runtime usage."
+        description="Registry identity, real model execution, generated outputs, evidence and deterministic controls."
         generatedAt={state.generatedAt}
       />
       <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <>
+        <div class="metric-grid">
+          <MetricCard label="Executions" value={state.data.aggregates?.total_executions || 0} />
+          <MetricCard label="Model executions" value={state.data.aggregates?.model_executions || 0} />
+          <MetricCard label="Success rate" value={state.data.aggregates?.success_rate != null ? `${state.data.aggregates.success_rate}%` : "Not observed"} />
+          <MetricCard label="Fallback rate" value={state.data.aggregates?.fallback_rate != null ? `${state.data.aggregates.fallback_rate}%` : "Not observed"} />
+          <MetricCard label="p50 latency" value={state.data.aggregates?.p50_latency_ms != null ? `${state.data.aggregates.p50_latency_ms} ms` : "Not observed"} />
+          <MetricCard label="p95 latency" value={state.data.aggregates?.p95_latency_ms != null ? `${state.data.aggregates.p95_latency_ms} ms` : "Not observed"} />
+          <MetricCard label="Thinking tokens" value={state.data.aggregates?.thinking_tokens || 0} />
+          <MetricCard label="Estimated model cost" value={state.data.aggregates?.estimated_model_cost ? `${state.data.aggregates.estimated_model_cost.currency} ${state.data.aggregates.estimated_model_cost.amount.toFixed(6)}` : "Not observed"} detail="Measured tokens · dated list rates" />
+        </div>
         {/* The fleet, before the registry detail. Every agent used to be an
             identical table row, so "who is doing this and what for" meant
             decoding an id string. Cards answer it at a glance; the table
@@ -1826,6 +1974,31 @@ function AgentsPage(props: PageProps) {
               ))}
           </div>
         </Panel>
+        <Panel title="Decision & generation trail" subtitle="Final rationale and evidence only — private chain-of-thought is never stored.">
+          <div class="table-filters" aria-label="Agent execution filters">
+            <label>Agent<select aria-label="Agent filter" value={agentFilter} onChange={(event) => setAgentFilter(event.currentTarget.value)}><option value="all">All agents</option>{filterValues("agent_id").map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+            <label>Status<select aria-label="Execution status filter" value={statusFilter} onChange={(event) => setStatusFilter(event.currentTarget.value)}><option value="all">All statuses</option>{filterValues("status").map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+            <label>Execution<select aria-label="Execution type filter" value={modelFilter} onChange={(event) => setModelFilter(event.currentTarget.value)}><option value="all">Model and deterministic</option>{filterValues("model", "deterministic").map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          </div>
+          <DataTable
+            label="Agent execution trail"
+            empty={{ title: "No agent execution events have been recorded.", detail: "Enable reasoning v2 and run an assessment or migration to create audited activity." }}
+            rows={filteredExecutions}
+            columns={[
+              { key: "completed_at", label: "Time" },
+              { key: "agent_id", label: "Agent" },
+              { key: "stage", label: "Stage" },
+              { key: "status", label: "Status", status: true },
+              { key: "model", label: "Model", value: (row) => row.model || "Deterministic" },
+              { key: "thinking_level", label: "Thinking" },
+              { key: "output_summary", label: "Decision / generated summary" },
+              { key: "confidence", label: "Confidence" },
+              { key: "fallback_used", label: "Fallback" },
+              { key: "duration_ms", label: "Latency ms", priority: "secondary" },
+            ]}
+            onRow={(row) => props.onInspect(row.model ? "Model execution evidence" : "Deterministic execution evidence", row)}
+          />
+        </Panel>
         <Panel title="Agent registry">
           <DataTable
             label="Agents"
@@ -1835,7 +2008,9 @@ function AgentsPage(props: PageProps) {
               { key: "version", label: "Version" },
               { key: "status", label: "Status", status: true },
               { key: "owner", label: "Owner" },
-              { key: "model", label: "Model" },
+              { key: "model", label: "Model", value: (row) => row.model?.name || row.model || "Deterministic only" },
+              { key: "thinking", label: "Thinking", value: (row) => row.model?.thinking_level || "Not applicable" },
+              { key: "required", label: "Model required", value: (row) => row.model_required ? "Yes" : "No" },
               { key: "framework", label: "Framework" },
               { key: "capabilities", label: "Capabilities" },
               {

@@ -109,8 +109,8 @@ describe("access levels on the sign-in screen", () => {
     const buttons = Array.from(container.querySelectorAll("button"));
     expect(buttons).toHaveLength(2);
     expect(buttons.map((button) => button.textContent)).toEqual([
-      expect.stringMatching(/Sign in with email/),
       expect.stringMatching(/Continue with Google/),
+      expect.stringMatching(/Sign in with domain email/),
     ]);
     expect(screen.queryByText(/sign in as operator/i)).toBeNull();
     expect(screen.queryByText(/sign in as approver/i)).toBeNull();
@@ -126,6 +126,7 @@ describe("access levels on the sign-in screen", () => {
         onPasswordSignIn={onPasswordSignIn}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /Sign in with domain email/ }));
     const email = screen.getByLabelText("Domain email address") as HTMLInputElement;
     const password = screen.getByLabelText("Password") as HTMLInputElement;
     fireEvent.input(email, { target: { value: "operator@example.test" } });

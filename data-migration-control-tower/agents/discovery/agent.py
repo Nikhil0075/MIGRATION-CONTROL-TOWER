@@ -29,7 +29,7 @@ from tools.source_catalog import (
 logger = logging.getLogger("discovery_agent")
 
 AGENT_ID = "discovery-agent"
-AGENT_VERSION = "0.1.0"
+AGENT_VERSION = "2.0.0"
 
 
 def _discover_registered_estate(estate_id: str) -> tuple[list[dict], list[dict]]:
@@ -144,7 +144,7 @@ try:
         # ADK requires a Python-identifier node name; AGENT_ID (with the
         # hyphen) remains the registry/logging identifier (master doc §20).
         name=AGENT_ID.replace("-", "_"),
-        model="gemini-3.5-flash",
+        model="gemini-3.7-flash",
         description=(
             "Inventories the legacy estate: SQL Server tables, the "
             "Oracle-dialect script corpus, and DAG/scheduling artifacts. "

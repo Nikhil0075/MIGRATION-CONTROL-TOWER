@@ -32,7 +32,13 @@ from tools import registry  # noqa: E402
 PUBLISHED_BY = "platform-eng-registry-publisher@example.internal"
 APPROVED_BY = "platform-governance@example.internal"
 OWNER = {"team": "Data Platform Engineering", "department": "Technology", "contact": "platform-eng@example.internal"}
-MODEL = {"name": "gemini-3.5-flash", "temperature": 0.1}
+MODEL = {
+    "provider": "vertex-ai",
+    "name": "gemini-3.7-flash",
+    "thinking_level": "high",
+    "prompt_version": "1.0",
+    "output_schema_version": "1.0",
+}
 
 AGENTS = [
     {
@@ -41,7 +47,8 @@ AGENTS = [
         "capabilities": ["discovery.catalog.estate"],
         "handler": "agents.discovery.agent:discover_estate",
         "permissions_key": "discovery",
-        "version": "1.1.0",
+        "version": "2.0.0",
+        "model_required": True,
     },
     {
         "agent_id": "lineage-agent",
@@ -49,6 +56,8 @@ AGENTS = [
         "capabilities": ["lineage.graph.build"],
         "handler": "agents.lineage.agent:build_dependency_graph",
         "permissions_key": "lineage",
+        "version": "2.0.0",
+        "model_required": True,
     },
     {
         "agent_id": "risk-agent",
@@ -56,6 +65,8 @@ AGENTS = [
         "capabilities": ["risk.assess.estate"],
         "handler": "agents.risk.agent:classify_estate",
         "permissions_key": "risk",
+        "version": "1.1.0",
+        "model_required": False,
     },
     {
         "agent_id": "planner-agent",
@@ -63,6 +74,8 @@ AGENTS = [
         "capabilities": ["planner.plan.propose"],
         "handler": "agents.planner.agent:propose_plan",
         "permissions_key": "planner",
+        "version": "2.0.0",
+        "model_required": True,
     },
     {
         "agent_id": "validation-agent",
@@ -70,6 +83,8 @@ AGENTS = [
         "capabilities": ["validation.reconcile.source_target"],
         "handler": "agents.validation.agent:run_reconciliation",
         "permissions_key": "validation",
+        "version": "1.1.0",
+        "model_required": False,
     },
     {
         "agent_id": "cutover-agent",
@@ -77,6 +92,8 @@ AGENTS = [
         "capabilities": ["cutover.request_approval"],
         "handler": "agents.cutover.agent:request_approval",
         "permissions_key": "cutover",
+        "version": "1.1.0",
+        "model_required": False,
     },
 ]
 
@@ -98,10 +115,16 @@ def main() -> None:
             "capabilities": spec["capabilities"],
             "handler": spec["handler"],
             "runtime": {"type": "local", "service_account": f"sa-{spec['permissions_key']}"},
-            "model": MODEL,
+            "model_required": bool(spec.get("model_required")),
             "permissions": permissions,
             "sla": {"p95_latency_ms": 45000, "max_retries": 3, "timeout_ms": 120000},
         }
+        # The AgentCard schema deliberately treats ``model`` as an object,
+        # not a nullable placeholder. Deterministic agents therefore omit the
+        # field entirely; this also keeps the console from implying that a
+        # model participates in policy, validation, or cutover controls.
+        if spec.get("model_required"):
+            card["model"] = MODEL
         registry.publish(card, published_by=PUBLISHED_BY)
         version = spec.get("version", "1.0.0")
         approved = registry.approve(spec["agent_id"], version, approved_by=APPROVED_BY)

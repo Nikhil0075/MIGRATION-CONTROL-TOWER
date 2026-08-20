@@ -25,11 +25,11 @@ google-cloud-bigquery==3.26.0
 # answered rather than failing or silently pretending.
 google-cloud-secret-manager>=2.20.0
 
-# Agent framework — falls back to google-generativeai if google-adk is
-# unavailable in this environment (documented Rung-2 substitution, see
-# infrastructure/README.md and Day 1 notes).
-google-adk==0.1.0; python_version >= "3.10"
-google-generativeai==0.8.3
+# Agent framework and the supported unified Gemini SDK. Deterministic tools
+# remain callable when ADK is unavailable; model-required V2 stages fail
+# visibly instead of silently substituting a different SDK or model.
+google-adk==2.7.1; python_version >= "3.10"
+google-genai==2.19.0
 Deprecated>=1.2.14  # transitive opentelemetry dependency not always pulled in automatically
 
 # Web service for Cloud Run
@@ -45,7 +45,7 @@ firebase-admin>=6.5.0
 # Multimodal discovery (§22): documentation fixtures + Gemini vision/file input
 Pillow>=10.4.0
 reportlab>=4.2.5
-google-cloud-aiplatform>=1.60.0  # Vertex AI GenerativeModel, also pulled transitively by google-adk
+google-cloud-storage>=2.19.0  # private immutable report artifacts
 
 # Cloud Trace instrumentation (Day 10 hardening, Phase 5, master doc
 # Appendix E: "Traces carry run ID and agent identity and are viewable

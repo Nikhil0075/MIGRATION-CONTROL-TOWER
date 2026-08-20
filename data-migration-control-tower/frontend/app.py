@@ -68,9 +68,9 @@ async def _lifespan(app: FastAPI):
     autoscales — so consumption is gated on a Firestore lease and the
     loser idles in standby. See tools/instance_lock.py.
     """
-    from frontend.worker_runtime import start_supervisor, stop_supervisor
+    from frontend.worker_runtime import start_supervisor_background, stop_supervisor
 
-    start_supervisor()
+    start_supervisor_background()
     try:
         yield
     finally:

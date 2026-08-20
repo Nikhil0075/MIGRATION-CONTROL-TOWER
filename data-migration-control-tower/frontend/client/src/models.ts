@@ -29,6 +29,11 @@ export interface RuntimeConfig {
   environment: string;
   authentication_configured: boolean;
   firebase: Record<string, string>;
+  features?: {
+    agent_reasoning: boolean;
+    reports: boolean;
+    assistant: boolean;
+  };
 }
 
 export interface EstateSummary {

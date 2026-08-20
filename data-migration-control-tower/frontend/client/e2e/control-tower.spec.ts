@@ -553,6 +553,122 @@ test("the workers panel names the reason when nothing is consuming", async ({ pa
   ).toBeVisible();
 });
 
+test("the read-only assistant streams evidence citations and navigates inside the console", async ({ page }) => {
+  await installApiFixtures(page, {
+    "/api/v1/config": {
+      body: {
+        product_name: "Migration Control Tower", build_version: "e2e", environment: "Test",
+        authentication_configured: true, firebase: {}, progress_poll_interval_ms: 2_000,
+        features: { agent_reasoning: true, reports: true, assistant: true },
+      },
+    },
+  });
+  await page.route("**/api/v1/assistant/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/messages")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: 'event: citations\ndata: [{"id":"run","label":"run-live","route":"/runs/run-live"}]\n\n'
+          + 'event: delta\ndata: {"text":"Reconciliation passed with durable evidence [run]."}\n\n'
+          + 'event: done\ndata: {"message_id":"message-e2e"}\n\n',
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ data: { session_id: "assistant-e2e" }, meta: { generated_at: generatedAt, freshness: "live" } }),
+    });
+  });
+  await page.goto("/runs");
+  await page.getByRole("button", { name: /Ask Control Tower/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Ask Control Tower" });
+  await expect(dialog.getByText(/cannot start, retry, approve or modify work/i)).toBeVisible();
+  await dialog.getByPlaceholder("Ask about this estate…").fill("Did reconciliation pass?");
+  await dialog.getByRole("button", { name: "Ask" }).click();
+  await expect(dialog.getByText("Reconciliation passed with durable evidence [run].")).toBeVisible();
+  await dialog.getByRole("button", { name: "[run] run-live" }).click();
+  await expect(page).toHaveURL(/\/runs\/run-live\?estate_id=/);
+});
+
+test("immutable reconciliation reports expose print, PDF, and JSON evidence actions", async ({ page }) => {
+  const requested: string[] = [];
+  await installApiFixtures(page, {
+    "/api/v1/config": {
+      body: {
+        product_name: "Migration Control Tower", build_version: "e2e", environment: "Test",
+        authentication_configured: true, firebase: {}, progress_poll_interval_ms: 2_000,
+        features: { agent_reasoning: true, reports: true, assistant: false },
+      },
+    },
+  });
+  await page.route("**/api/v1/reports**", async (route) => {
+    const url = new URL(route.request().url());
+    requested.push(`${route.request().method()} ${url.pathname}${url.search}`);
+    if (url.pathname.endsWith("/download")) {
+      const format = url.searchParams.get("format");
+      await route.fulfill({
+        status: 200,
+        contentType: format === "json" ? "application/json" : "application/pdf",
+        headers: { "Content-Disposition": `attachment; filename=report.${format}` },
+        body: format === "json" ? '{"evidence_hash":"abc"}' : "%PDF-1.4 e2e",
+      });
+      return;
+    }
+    await route.fulfill({
+      status: route.request().method() === "POST" ? 202 : 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: { report_id: "report-e2e", report_type: "reconciliation", status: "ready", evidence_hash: "abc" },
+        meta: { generated_at: generatedAt, freshness: "live" },
+      }),
+    });
+  });
+  await page.goto("/reconciliation");
+  await page.getByRole("row", { name: /run-live/ }).click();
+  await page.getByRole("button", { name: "Generate report" }).click();
+  await expect(page.getByRole("button", { name: "Print" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download JSON" })).toBeVisible();
+  const pdf = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download PDF" }).click();
+  await pdf;
+  const json = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download JSON" }).click();
+  await json;
+  expect(requested.some((value) => value.includes("format=pdf"))).toBe(true);
+  expect(requested.some((value) => value.includes("format=json"))).toBe(true);
+});
+
+test("the Agents decision trail distinguishes model proposals from deterministic controls", async ({ page }) => {
+  await installApiFixtures(page, {
+    "/api/v1/agents": {
+      body: {
+        cards: (fixtureByPath["/api/v1/agents"] as any).cards,
+        pinned_run_counts: {},
+        aggregates: {
+          total_executions: 2, model_executions: 1, completed: 2, failed: 0,
+          success_rate: 100, fallback_rate: 0, p50_latency_ms: 20, p95_latency_ms: 420,
+          thinking_tokens: 345, estimated_model_cost: { currency: "USD", amount: 0.00123 },
+        },
+        recent_executions: [
+          { event_id: "ai-1", completed_at: generatedAt, agent_id: "discovery-agent", stage: "DISCOVERY", status: "COMPLETED", model: "gemini-3.7-flash", thinking_level: "high", output_summary: "Semantic proposal", confidence: 0.92, fallback_used: false, evidence_refs: ["Sales.Customers"] },
+          { event_id: "det-1", completed_at: generatedAt, agent_id: "validation-agent", stage: "VALIDATION", status: "COMPLETED", model: null, output_summary: "Reconciliation control passed", fallback_used: false, evidence_refs: ["reconciliation:row_count"] },
+        ],
+      },
+    },
+  });
+  await page.goto("/agents");
+  await expect(page.getByText("Semantic proposal")).toBeVisible();
+  await expect(page.getByText("Reconciliation control passed")).toBeVisible();
+  await expect(page.getByText("Deterministic", { exact: true })).toBeVisible();
+  await page.getByLabel("Execution type filter").selectOption("gemini-3.7-flash");
+  await expect(page.getByText("Reconciliation control passed")).toBeHidden();
+  await page.getByRole("row", { name: /Semantic proposal/ }).click();
+  await expect(page.getByRole("heading", { name: "Model execution evidence" })).toBeVisible();
+});
+
 
 test("the brand identity is actually applied, not just present in the CSS", async ({ page }) => {
   // Deliberately a computed-style assertion rather than a screenshot.

@@ -58,7 +58,7 @@ logger = logging.getLogger("validation_agent")
 
 AGENT_ID = "validation-agent"
 AGENT_POLICY_KEY = "validation"
-AGENT_VERSION = "0.1.0"
+AGENT_VERSION = "1.1.0"
 
 RUN_COLLECTION = "migration_runs"
 

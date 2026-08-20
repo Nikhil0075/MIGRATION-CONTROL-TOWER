@@ -101,6 +101,9 @@ def record_model_usage(
     input_tokens: int,
     output_tokens: int,
     purpose: str,
+    thinking_tokens: int = 0,
+    cached_tokens: int = 0,
+    request_id: str | None = None,
 ) -> dict | None:
     """Records one model call's token usage against a run.
 
@@ -115,7 +118,10 @@ def record_model_usage(
             "model": model,
             "input_tokens": int(input_tokens),
             "output_tokens": int(output_tokens),
+            "thinking_tokens": int(thinking_tokens),
+            "cached_tokens": int(cached_tokens),
             "purpose": purpose,
+            "request_id": request_id,
         },
     )
 
@@ -182,6 +188,8 @@ def price_usage(events: list[dict], price_book: dict | None = None) -> dict:
     totals = {
         "input_tokens": 0,
         "output_tokens": 0,
+        "thinking_tokens": 0,
+        "cached_tokens": 0,
         "bytes_billed": 0,
         "model_calls": 0,
         "bigquery_jobs": 0,
@@ -197,6 +205,8 @@ def price_usage(events: list[dict], price_book: dict | None = None) -> dict:
             totals["model_calls"] += 1
             totals["input_tokens"] += int(event.get("input_tokens") or 0)
             totals["output_tokens"] += int(event.get("output_tokens") or 0)
+            totals["thinking_tokens"] += int(event.get("thinking_tokens") or 0)
+            totals["cached_tokens"] += int(event.get("cached_tokens") or 0)
             if not rate:
                 unpriced.append(f"model:{model or 'unknown'}")
                 continue
@@ -206,7 +216,7 @@ def price_usage(events: list[dict], price_book: dict | None = None) -> dict:
                 unpriced.append(f"model:{model} (priced at default rate)")
             cost = (
                 int(event.get("input_tokens") or 0) * rate["input"]
-                + int(event.get("output_tokens") or 0) * rate["output"]
+                + (int(event.get("output_tokens") or 0) + int(event.get("thinking_tokens") or 0)) * rate["output"]
             ) / _TOKENS_PER_UNIT
             by_kind["model"] = by_kind.get("model", 0.0) + cost
         elif kind == "bigquery":

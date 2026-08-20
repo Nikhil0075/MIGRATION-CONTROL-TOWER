@@ -48,7 +48,13 @@ CARD = {
     "capabilities": ["impact.assessment.finance_reporting"],
     "handler": "agents.finance.impact_agent:assess_impact",
     "runtime": {"type": "local", "service_account": "sa-finance-impact"},
-    "model": {"name": "gemini-3.5-flash", "temperature": 0.1},
+    "model": {
+        "provider": "vertex-ai",
+        "name": "gemini-3.7-flash",
+        "thinking_level": "high",
+        "prompt_version": "1.0",
+        "output_schema_version": "1.0",
+    },
     "permissions": {
         "allowed_tools": ["lineage.graph.read"],
         "denied_tools": ["source.raw_pii_read", "target.write", "production.write"],

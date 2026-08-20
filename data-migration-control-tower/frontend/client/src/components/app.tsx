@@ -10,6 +10,7 @@ import { publicApi, api } from "../api";
 import {
   authenticationErrorMessage,
   initializeAuthentication,
+  resetPassword,
   signInWithGoogle,
   signInWithPassword,
   signOutUser,
@@ -17,6 +18,7 @@ import {
 import { EstateSummary, NavItem, Role, RuntimeConfig, Session } from "../models";
 import { Icon } from "./icons";
 import { AuthenticationGate, NoAccessGate } from "./access-gates";
+import { ControlTowerAssistant } from "./assistant";
 import { PageRouter } from "./pages";
 import "../styles/app.css";
 
@@ -267,6 +269,7 @@ export const App = registerCustomElement("app-root", (_props: Props) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const [navigationOpen, setNavigationOpen] = useState(width >= 1024);
   const [inspector, setInspector] = useState<{
@@ -440,6 +443,14 @@ export const App = registerCustomElement("app-root", (_props: Props) => {
           } catch (reason) {
             setAuthError(authenticationErrorMessage(reason));
             throw reason;
+          }
+        }}
+        onPasswordReset={async (email) => {
+          try {
+            await resetPassword(email);
+          } catch {
+            // Enumeration-safe: the gate displays the same completion text
+            // whether or not Firebase accepted the address.
           }
         }}
       />
@@ -631,9 +642,24 @@ export const App = registerCustomElement("app-root", (_props: Props) => {
               switchEstate(estate.estate_id);
             }}
             progressPollIntervalMs={config.progress_poll_interval_ms || 2000}
+            features={config.features}
           />
         </main>
       </DrawerLayout>
+      {config.features?.assistant && (
+        <>
+          <button class="assistant-launcher button button-primary" type="button" disabled={assistantOpen} onClick={() => setAssistantOpen(true)} aria-expanded={assistantOpen} aria-controls="control-tower-assistant">
+            <Icon name="agents" /> Ask Control Tower
+          </button>
+          <ControlTowerAssistant
+            open={assistantOpen}
+            estateId={activeEstateId}
+            route={route}
+            onClose={() => setAssistantOpen(false)}
+            onNavigate={navigate}
+          />
+        </>
+      )}
       {mediumDesktop && inspector && (
         <span class="sr-only" aria-live="polite">
           Inspector opened as an overlay.

@@ -34,7 +34,7 @@ logger = logging.getLogger("risk_agent")
 
 AGENT_ID = "risk-agent"
 AGENT_POLICY_KEY = "risk"  # key into policies/agent_permissions.yaml
-AGENT_VERSION = "0.1.0"
+AGENT_VERSION = "1.1.0"
 
 RUN_COLLECTION = "migration_runs"
 

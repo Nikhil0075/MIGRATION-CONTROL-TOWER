@@ -507,6 +507,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/{agent_id}/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Agent Executions */
+        get: operations["agent_executions_api_v1_agents__agent_id__executions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/agent-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Agent Events */
+        get: operations["run_agent_events_api_v1_runs__run_id__agent_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/evaluations": {
         parameters: {
             query?: never;
@@ -703,6 +737,281 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dead-letters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dead Letters
+         * @description What the fleet gave up on, and which consumer gave up.
+         *
+         *     Reading is non-destructive: tools/dead_letters.py returns each lease
+         *     immediately, so refreshing this page does not hide the queue from the
+         *     next reader for a minute.
+         */
+        get: operations["dead_letters_api_v1_dead_letters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dead-letters/{message_id}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Act On Dead Letter
+         * @description Replay a dead letter onto its original topic, or archive it.
+         *
+         *     NOT estate-scoped, and one of the few mutating routes that does not
+         *     call authorize_estate — see NON_ESTATE_MUTATING_ROUTES in
+         *     tests/test_estate_rbac.py. A dead letter is a message on a fleet-wide
+         *     subscription; its payload may name an estate, but the queue does not
+         *     belong to one, and authorizing against an estate parsed out of an
+         *     untrusted payload would be worse than not authorizing at all.
+         *
+         *     No Idempotency-Key: the message id IS the idempotency key. Replaying a
+         *     message that has already been replayed fails with 404 because it is no
+         *     longer in the queue.
+         */
+        post: operations["act_on_dead_letter_api_v1_dead_letters__message_id___action__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Incidents
+         * @description Everything that went wrong on a run, in one place.
+         *
+         *     Assembled from collections that already exist rather than from a new
+         *     incident store: recovery.py's per-run `incidents` subcollection, the
+         *     reconciliation checks that failed, and the policy decisions that
+         *     denied. `canonical_root_cause` is surfaced rather than `root_cause` —
+         *     the latter is display-wrapped narrative ("recalled from memory…") and
+         *     conflating the two was a real defect that nested wrapper text across
+         *     generations.
+         */
+        get: operations["incidents_api_v1_incidents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/memory-bank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Memory Bank Facts
+         * @description Durable remediation facts learned across runs.
+         *
+         *     Deliberately NOT estate-scoped, and not filterable by one: the whole
+         *     value of this collection is that a fact confirmed on one estate is
+         *     available to a later run on another. That is also its honest cost —
+         *     a signature carries a source table name, so this is the one place
+         *     where metadata legitimately crosses an estate boundary. Read access
+         *     is therefore the same coarse role as the rest of the console rather
+         *     than an estate grant, and the UI says so on the page.
+         *
+         *     `root_cause` here is already the canonical fact: recovery.py writes
+         *     `canonical_root_cause` into memory precisely so that re-confirming an
+         *     already-recalled fact does not nest another "Recalled from memory…"
+         *     wrapper on every generation. Nothing further needs unwrapping.
+         */
+        get: operations["memory_bank_facts_api_v1_memory_bank_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Approvals
+         * @description The cutover approval inbox, with the evidence behind each decision.
+         *
+         *     The point of this endpoint is one fact that was previously invisible
+         *     until it was too late to matter: an approval token is bound to the
+         *     plan hash it was issued against, and `approval_service.consume()`
+         *     refuses the cutover if the plan has changed since. That refusal
+         *     happened at cutover time, long after the human clicked approve. Here
+         *     the binding is compared up front, so a stale approval is visible
+         *     BEFORE anyone relies on it.
+         *
+         *     Nothing here can approve anything. The only path from
+         *     READY_FOR_APPROVAL to APPROVED remains the authenticated approver
+         *     endpoint, which is a separate identity from every agent.
+         */
+        get: operations["approvals_api_v1_approvals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Report */
+        post: operations["create_report_api_v1_reports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Latest Report
+         * @description Restore the most recent authorized artifact after page navigation.
+         *
+         *     Report generation is asynchronous and the client may be closed or moved
+         *     to another route while it runs. Keeping the report id only in component
+         *     state made completed artifacts effectively disappear from the console.
+         */
+        get: operations["latest_report_api_v1_reports_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report Status */
+        get: operations["report_status_api_v1_reports__report_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/{report_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report Download */
+        get: operations["report_download_api_v1_reports__report_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assistant/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Assistant Create Session */
+        post: operations["assistant_create_session_api_v1_assistant_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assistant/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Assistant Get Session */
+        get: operations["assistant_get_session_api_v1_assistant_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        /** Assistant Delete Session */
+        delete: operations["assistant_delete_session_api_v1_assistant_sessions__session_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assistant/sessions/{session_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Assistant Message */
+        post: operations["assistant_message_api_v1_assistant_sessions__session_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/legacy": {
         parameters: {
             query?: never;
@@ -758,6 +1067,26 @@ export interface components {
             /** Justification */
             justification: string;
         };
+        /** AssistantMessageRequest */
+        AssistantMessageRequest: {
+            /** Question */
+            question: string;
+        };
+        /** AssistantSessionRequest */
+        AssistantSessionRequest: {
+            /**
+             * Estate Id
+             * @default wwi-demo-estate
+             */
+            estate_id: string;
+            /**
+             * Route
+             * @default /overview
+             */
+            route: string;
+            /** Run Id */
+            run_id?: string | null;
+        };
         /**
          * ConnectionProfileModel
          * @description How to reach a source, BY REFERENCE ONLY.
@@ -800,6 +1129,23 @@ export interface components {
             owner?: {
                 [key: string]: unknown;
             } | null;
+            /** Justification */
+            justification: string;
+        };
+        /** CreateReportRequest */
+        CreateReportRequest: {
+            /**
+             * Report Type
+             * @enum {string}
+             */
+            report_type: "assessment" | "run_evidence" | "reconciliation" | "approval_audit";
+            /** Run Id */
+            run_id: string;
+            /** Justification */
+            justification: string;
+        };
+        /** DeadLetterActionRequest */
+        DeadLetterActionRequest: {
             /** Justification */
             justification: string;
         };
@@ -1951,6 +2297,79 @@ export interface operations {
             };
         };
     };
+    agent_executions_api_v1_agents__agent_id__executions_get: {
+        parameters: {
+            query?: {
+                estate_id?: string | null;
+                run_id?: string | null;
+                status?: string | null;
+                model?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_agent_events_api_v1_runs__run_id__agent_events_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     evaluations_api_v1_evaluations_get: {
         parameters: {
             query?: {
@@ -2287,6 +2706,451 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dead_letters_api_v1_dead_letters_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    act_on_dead_letter_api_v1_dead_letters__message_id___action__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                message_id: string;
+                action: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeadLetterActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    incidents_api_v1_incidents_get: {
+        parameters: {
+            query?: {
+                estate_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    memory_bank_facts_api_v1_memory_bank_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approvals_api_v1_approvals_get: {
+        parameters: {
+            query?: {
+                estate_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_report_api_v1_reports_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateReportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_report_api_v1_reports_latest_get: {
+        parameters: {
+            query: {
+                run_id: string;
+                report_type: "assessment" | "run_evidence" | "reconciliation" | "approval_audit";
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_status_api_v1_reports__report_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_download_api_v1_reports__report_id__download_get: {
+        parameters: {
+            query?: {
+                format?: "pdf" | "json";
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assistant_create_session_api_v1_assistant_sessions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssistantSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assistant_get_session_api_v1_assistant_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assistant_delete_session_api_v1_assistant_sessions__session_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                authorization?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assistant_message_api_v1_assistant_sessions__session_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssistantMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

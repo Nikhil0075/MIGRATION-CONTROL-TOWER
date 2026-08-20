@@ -23,7 +23,7 @@
   "region": "us-central1",
   "basis": "published list price",
   "sources": {
-    "vertex_ai": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+    "vertex_ai": "https://ai.google.dev/gemini-api/docs/pricing",
     "bigquery": "https://cloud.google.com/bigquery/pricing"
   },
   "rates": {
@@ -32,7 +32,12 @@
       "unit": "per_million_tokens",
       "models": {
         "default": { "input": 0.30, "output": 2.50 },
-        "gemini-3.5-flash": { "input": 0.30, "output": 2.50 },
+        "gemini-3.7-flash": {
+          "$comment": "Published promotional rate effective through 2026-12-31; re-verify before that date.",
+          "input": 0.75,
+          "output": 3.75
+        },
+        "gemini-3.5-flash": { "input": 1.50, "output": 9.00 },
         "gemini-2.5-flash": { "input": 0.30, "output": 2.50 },
         "gemini-2.0-flash": { "input": 0.15, "output": 0.60 },
         "gemini-2.5-pro": { "input": 1.25, "output": 10.00 }

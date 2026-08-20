@@ -26,6 +26,7 @@ PROJECT_ID="$(gcloud config get-value project 2>/dev/null)"
 REGION="${GCP_REGION:-us-central1}"
 BQ_DATASET="${BQ_DATASET:-migration_target}"
 SA_ORCHESTRATOR="sa-orchestrator"
+REPORTS_BUCKET="${REPORTS_BUCKET:-${PROJECT_ID}-migration-control-tower-reports}"
 
 if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "(unset)" ]; then
   echo "ERROR: no active gcloud project. Run: gcloud config set project <id>" >&2
@@ -43,6 +44,7 @@ gcloud services enable \
   cloudbuild.googleapis.com \
   artifactregistry.googleapis.com \
   aiplatform.googleapis.com \
+  storage.googleapis.com \
   --project="$PROJECT_ID"
 
 echo "==> Ensuring Firestore database (Native mode) exists..."
@@ -68,6 +70,35 @@ if ! gcloud firestore databases describe --database="$TEST_DATABASE" --project="
 else
   echo "    Test database already exists, skipping."
 fi
+
+echo "==> Enabling 30-day TTL collection groups for assistant data..."
+for collection_group in assistant_sessions assistant_messages assistant_safety_events; do
+  gcloud firestore fields ttls update expires_at \
+    --collection-group="$collection_group" \
+    --database="(default)" \
+    --enable-ttl \
+    --project="$PROJECT_ID" \
+    --quiet >/dev/null
+done
+
+echo "==> Ensuring private immutable-report bucket '$REPORTS_BUCKET' exists..."
+if ! gcloud storage buckets describe "gs://${REPORTS_BUCKET}" --project="$PROJECT_ID" >/dev/null 2>&1; then
+  gcloud storage buckets create "gs://${REPORTS_BUCKET}" \
+    --project="$PROJECT_ID" \
+    --location="$REGION" \
+    --uniform-bucket-level-access
+  gcloud storage buckets update "gs://${REPORTS_BUCKET}" --retention-period=30d --quiet >/dev/null
+else
+  echo "    Report bucket already exists, skipping creation."
+  existing_retention="$(gcloud storage buckets describe "gs://${REPORTS_BUCKET}" --format='value(retention_policy.retentionPeriod)' 2>/dev/null || true)"
+  if [ -z "$existing_retention" ]; then
+    gcloud storage buckets update "gs://${REPORTS_BUCKET}" --retention-period=30d --quiet >/dev/null
+  else
+    echo "    Existing retention policy '$existing_retention' preserved (never shortened automatically)."
+  fi
+fi
+# SHA-addressed writes are create-only in the application. A retention
+# policy adds a storage-layer guard against accidental early deletion.
 
 echo "==> Ensuring BigQuery dataset '$BQ_DATASET' exists..."
 if ! bq --project_id="$PROJECT_ID" show "${PROJECT_ID}:${BQ_DATASET}" >/dev/null 2>&1; then
@@ -226,11 +257,17 @@ else
 fi
 
 echo "==> Granting least-privilege roles to $SA_EMAIL..."
-for role in roles/datastore.user roles/pubsub.publisher roles/pubsub.subscriber roles/bigquery.dataEditor; do
+for role in roles/datastore.user roles/pubsub.publisher roles/pubsub.subscriber roles/bigquery.dataEditor roles/aiplatform.user; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="$role" \
     --condition=None \
+    --quiet >/dev/null
+done
+for role in roles/storage.objectCreator roles/storage.objectViewer; do
+  gcloud storage buckets add-iam-policy-binding "gs://${REPORTS_BUCKET}" \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="$role" \
     --quiet >/dev/null
 done
 
@@ -271,6 +308,14 @@ for sa in "${!AGENT_SAS[@]}"; do
       --quiet >/dev/null
   done
 done
+# Only agents with bounded model reasoning receive Vertex AI invocation.
+for sa in sa-discovery sa-lineage sa-planner; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${sa}@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --role=roles/aiplatform.user \
+    --condition=None \
+    --quiet >/dev/null
+done
 # validation and cutover additionally query BigQuery (reconciliation,
 # post-cutover monitoring).
 for sa in sa-validation sa-cutover; do
@@ -288,6 +333,7 @@ echo "    Firestore:      (default) native mode"
 echo "    Firestore test: $TEST_DATABASE (pytest writes here, never (default))"
 echo "    BigQuery:       ${PROJECT_ID}:${BQ_DATASET}"
 echo "    Billing export: ${PROJECT_ID}:${BILLING_EXPORT_DATASET} ($BILLING_EXPORT_LOCATION multi-region)"
+echo "    Reports bucket: gs://${REPORTS_BUCKET} (uniform access, 30-day retention)"
 echo "    Pub/Sub topics: ${TOPICS[*]}"
 echo "    Pub/Sub subs:   ${!SUBSCRIPTIONS[*]}"
 echo "    Dead letters:   -> '$DEAD_LETTER_TOPIC' after $MAX_DELIVERY_ATTEMPTS attempts;"

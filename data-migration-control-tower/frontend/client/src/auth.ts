@@ -5,8 +5,10 @@ import {
   User,
   getAuth,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
 } from "firebase/auth";
 
@@ -33,12 +35,39 @@ export function initializeAuthentication(
 
 export async function signInWithGoogle(): Promise<void> {
   if (!auth) throw new Error("Firebase authentication is not configured.");
-  await signInWithPopup(auth, new GoogleAuthProvider());
+  const provider = new GoogleAuthProvider();
+  const mobile = window.matchMedia("(max-width: 599px)").matches;
+  if (mobile) {
+    await signInWithRedirect(auth, provider);
+    return;
+  }
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (reason) {
+    const code = String((reason as { code?: unknown } | null)?.code || "");
+    if ([
+      "auth/popup-blocked",
+      "auth/cancelled-popup-request",
+      "auth/web-storage-unsupported",
+      "auth/internal-error",
+    ].includes(code)) {
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+    throw reason;
+  }
 }
 
 export async function signInWithPassword(email: string, password: string): Promise<void> {
   if (!auth) throw new Error("Firebase authentication is not configured.");
   await signInWithEmailAndPassword(auth, email.trim(), password);
+}
+
+export async function resetPassword(email: string): Promise<void> {
+  if (!auth) throw new Error("Firebase authentication is not configured.");
+  // Firebase email-enumeration protection should also be enabled in the
+  // project. The UI always returns the same confirmation either way.
+  await sendPasswordResetEmail(auth, email.trim());
 }
 
 /**

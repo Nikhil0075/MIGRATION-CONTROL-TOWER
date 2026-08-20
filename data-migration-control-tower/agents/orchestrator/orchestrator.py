@@ -58,7 +58,7 @@ import time
 
 from google.cloud import firestore
 
-from tools import registry, tracing, wave_manager
+from tools import agent_audit, registry, tracing, wave_manager
 from tools.events import ack, nack, publish, pull
 from tools.firestore_client import get_client
 from tools.migration_executor import execute_migration
@@ -339,12 +339,72 @@ def handle_migration_requested(payload: dict) -> dict:
         pin_agent_version(run_id, agent_id, version)
         logger.info("resolved %s (capability=%s) -> v%s", agent_id, DISCOVERY_CAPABILITY, version)
 
+        from tools.model_gateway import DiscoveryReasoning, generate_structured
+
+        evidence_refs = [
+            str(item.get("table_id") or item.get("pipeline_id"))
+            for item in [*table_records, *pipeline_records]
+            if item.get("table_id") or item.get("pipeline_id")
+        ]
+        reasoning = generate_structured(
+            run_id=run_id,
+            agent_id=agent_id,
+            capability="discovery.reason.semantic_enrichment",
+            stage="DISCOVERY",
+            instruction=(
+                "Analyze the supplied metadata inventory for semantic domains and suspicious metadata anomalies. "
+                "Do not add, remove, rename, classify, or modify assets; this output is advisory enrichment only."
+            ),
+            payload={
+                "assets": [
+                    {
+                        "asset_id": item.get("table_id") or item.get("pipeline_id"),
+                        "evidence_ref": item.get("table_id") or item.get("pipeline_id"),
+                        "schema": item.get("schema"),
+                        "table": item.get("table"),
+                        "columns": [column.get("name") for column in (item.get("columns") or [])[:80]],
+                        "source_system": item.get("source_system"),
+                        "schedule": item.get("schedule"),
+                    }
+                    for item in [*table_records, *pipeline_records]
+                ]
+            },
+            output_schema=DiscoveryReasoning,
+            evidence_refs=evidence_refs,
+            tool_calls=[{"tool": "source_adapters.discover", "status": "COMPLETED"}],
+            required=True,
+            agent_version=version,
+            generated_artifact_refs=["agent_artifacts/discovery_reasoning"],
+        )
+        if reasoning is not None:
+            get_client().collection("migration_runs").document(run_id).collection("agent_artifacts").document(
+                "discovery_reasoning"
+            ).set(reasoning.model_dump())
+
         # write_catalog is deterministic state-plane code (run_lifecycle.py),
         # not an agent capability — imported directly like every other
         # orchestrator-owned state transition.
         from agents.orchestrator.run_lifecycle import write_catalog
 
         catalog_summary = write_catalog(run_id, table_records, pipeline_records)
+        agent_audit.append_deterministic(
+            run_id,
+            agent_id=agent_id,
+            agent_version=version,
+            capability=DISCOVERY_CAPABILITY,
+            stage="DISCOVERY",
+            output_summary=(
+                f"Estate adapters discovered {len(table_records)} table(s) and "
+                f"{len(pipeline_records)} lineage pipeline artifact(s)."
+            ),
+            evidence_refs=evidence_refs,
+            tool_calls=[
+                {"tool": "source_adapters.discover", "status": "COMPLETED"},
+                {"tool": "run_lifecycle.write_catalog", "status": "COMPLETED"},
+            ],
+            generated_output=catalog_summary,
+            idempotency_ref=str(payload.get("_pubsub_message_id") or "migration-requested"),
+        )
 
         publish("discovery.completed", {"run_id": run_id})
         logger.info("discovery.completed published for run: %s", run_id)
@@ -398,6 +458,28 @@ def handle_discovery_completed(payload: dict) -> dict:
             drift_summary = assess_documentation_drift(run_id)
             pii_decision = verify_pii_access_boundary(run_id)
             transition_state(run_id, "RISK_ASSESSED")
+            agent_audit.append_deterministic(
+                run_id,
+                agent_id=risk_agent_id,
+                agent_version=risk_version,
+                capability=RISK_CAPABILITY,
+                stage="RISK_ASSESSED",
+                output_summary="Deterministic risk, PII-boundary and documentation-drift controls completed.",
+                tool_calls=[
+                    {"tool": "risk.classify_estate", "status": "COMPLETED"},
+                    {"tool": "risk.fast_pii_prescreen", "status": "COMPLETED"},
+                    {"tool": "risk.documentation_drift", "status": "COMPLETED"},
+                    {"tool": "policy.verify_pii_access_boundary", "status": pii_decision.get("decision")},
+                    {"tool": "run.transition_state", "status": "RISK_ASSESSED"},
+                ],
+                generated_output={
+                    "risk": risk_summary,
+                    "fast_pii_prescreen": prescreen_summary,
+                    "documentation_drift": drift_summary,
+                    "pii_access_decision": pii_decision,
+                },
+                idempotency_ref=str(payload.get("_pubsub_message_id") or "discovery-completed"),
+            )
             logger.info(
                 "resolved %s (capability=%s) -> v%s, run %s -> RISK_ASSESSED (%s)",
                 risk_agent_id, RISK_CAPABILITY, risk_version, run_id, risk_summary,
@@ -461,6 +543,22 @@ def handle_risk_assessed(payload: dict) -> dict:
             current_span.set_attribute("version", version)
             current_span.set_attribute("plan_hash", plan["plan_hash"])
         transition_state(run_id, "PLANNED")
+        agent_audit.append_deterministic(
+            run_id,
+            agent_id=agent_id,
+            agent_version=version,
+            capability=PLANNER_CAPABILITY,
+            stage="PLANNED",
+            output_summary="Deterministic plan scope, target bindings, rollback controls and plan hash were persisted.",
+            evidence_refs=[str(target.get("table_id")) for target in plan.get("targets", []) if target.get("table_id")],
+            tool_calls=[
+                {"tool": "planner.build_targets", "status": "COMPLETED"},
+                {"tool": "planner.compute_plan_hash", "status": "COMPLETED"},
+                {"tool": "run.transition_state", "status": "PLANNED"},
+            ],
+            generated_output={"plan_hash": plan.get("plan_hash"), "target_count": len(plan.get("targets", []))},
+            idempotency_ref=str(payload.get("_pubsub_message_id") or "risk-assessed"),
+        )
         logger.info(
             "resolved %s (capability=%s) -> v%s, run %s -> PLANNED (plan_hash=%s, steps=%d)",
             agent_id, PLANNER_CAPABILITY, version, run_id, plan["plan_hash"][:12], len(plan["steps"]),
@@ -593,6 +691,24 @@ def handle_planned(payload: dict) -> dict:
             }
 
             transition_state(run_id, "VALIDATING")
+            agent_audit.append_deterministic(
+                run_id,
+                agent_id="migration-tools",
+                capability="migration.execute.plan_targets",
+                stage="MIGRATING",
+                output_summary=(
+                    f"Executed {len(executions)} plan-bound target(s); loaded "
+                    f"{manifest['target_count']} of {manifest['source_count']} source rows."
+                ),
+                evidence_refs=[str(target.get("table_id")) for target in targets if target.get("table_id")],
+                tool_calls=[
+                    {"tool": "wave_manager.reserve_slot", "status": "ADMIT"},
+                    {"tool": "migration_executor.execute_migration", "status": "COMPLETED"},
+                    {"tool": "run.transition_state", "status": "VALIDATING"},
+                ],
+                generated_output=manifest,
+                idempotency_ref=str(payload.get("_pubsub_message_id") or "plan-created"),
+            )
             logger.info(
                 "plan.created -> %d target(s) executed (drop_fraction=%s, loaded %d/%d rows), "
                 "run %s -> VALIDATING",
@@ -666,6 +782,25 @@ def handle_validation_requested(payload: dict) -> dict:
                 agent_id, VALIDATION_CAPABILITY, version, run_id,
             )
 
+        agent_audit.append_deterministic(
+            run_id,
+            agent_id=agent_id,
+            agent_version=version,
+            capability=VALIDATION_CAPABILITY,
+            stage="VALIDATION",
+            output_summary=f"Deterministic reconciliation completed with status {result['overall_status']}.",
+            evidence_refs=[
+                f"reconciliation:{check.get('check_id') or check.get('check_type')}"
+                for check in result.get("checks", [])
+            ],
+            tool_calls=[
+                {"tool": "validation.run_reconciliation", "status": result["overall_status"]},
+                {"tool": "run.transition_state", "status": "PASSED" if result["overall_status"] == "PASSED" else "FAILED"},
+            ],
+            generated_output={"overall_status": result["overall_status"], "checks": result.get("checks", [])},
+            idempotency_ref=str(payload.get("_pubsub_message_id") or "validation-requested"),
+        )
+
     result_out = {"run_id": run_id, "overall_status": result["overall_status"], "checks": result["checks"]}
     _dedup_complete(payload, "handle_validation_requested", result_out)
     return result_out
@@ -710,6 +845,20 @@ def handle_validation_passed(payload: dict) -> dict:
         "agent_id": agent_id,
         "version": version,
     }
+    agent_audit.append_deterministic(
+        run_id,
+        agent_id=agent_id,
+        agent_version=version,
+        capability=CUTOVER_CAPABILITY,
+        stage="READY_FOR_APPROVAL",
+        output_summary="A plan-bound approval request was prepared; human approval remains required.",
+        tool_calls=[
+            {"tool": "cutover.request_approval", "status": approval.get("status")},
+            {"tool": "run.transition_state", "status": "READY_FOR_APPROVAL"},
+        ],
+        generated_output={"approval_status": approval.get("status"), "state": "READY_FOR_APPROVAL"},
+        idempotency_ref=str(payload.get("_pubsub_message_id") or "validation-passed"),
+    )
     _dedup_complete(payload, "handle_validation_passed", result)
     return result
 
@@ -755,6 +904,22 @@ def handle_validation_failed(payload: dict) -> dict:
             binding=plan_binding(run_id),
         )
         transition_state(run_id, "VALIDATING")
+
+        agent_audit.append_deterministic(
+            run_id,
+            agent_id="orchestrator",
+            capability="recovery.remediate.reconciliation_failure",
+            stage="REMEDIATING",
+            output_summary="Deterministic clean reload remediation completed and revalidation was requested.",
+            evidence_refs=[f"incident:{incident.get('signature')}"],
+            tool_calls=[
+                {"tool": "recovery.investigate", "status": "COMPLETED"},
+                {"tool": "recovery.remediate", "status": "COMPLETED"},
+                {"tool": "run.transition_state", "status": "VALIDATING"},
+            ],
+            generated_output=incident,
+            idempotency_ref=str(payload.get("_pubsub_message_id") or "validation-failed"),
+        )
 
         publish("validation.requested", {"run_id": run_id})
         logger.info("validation.requested (re-check) published for run: %s", run_id)

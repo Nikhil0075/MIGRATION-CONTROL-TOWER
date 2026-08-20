@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 from tools.worker_supervisor import WorkerSupervisor, selected_specs, workers_enabled
 
@@ -28,6 +29,36 @@ logger = logging.getLogger("worker_runtime")
 
 _supervisor: WorkerSupervisor | None = None
 _disabled_reason: str | None = None
+_startup_thread: threading.Thread | None = None
+_shutdown_requested = False
+
+
+def start_supervisor_background() -> None:
+    """Initialize consumers without holding the ASGI startup boundary.
+
+    Client warming and the Firestore lease are external calls. If either is
+    slow, operators still need the console and System Health page that explain
+    worker readiness; binding the HTTP port must not depend on them.
+    """
+    global _startup_thread, _disabled_reason, _shutdown_requested
+    if _supervisor is not None or (_startup_thread and _startup_thread.is_alive()):
+        return
+    _shutdown_requested = False
+    _disabled_reason = "the worker supervisor is initializing"
+
+    def initialize() -> None:
+        global _supervisor
+        supervisor = start_supervisor()
+        if _shutdown_requested and supervisor is not None:
+            supervisor.stop(timeout=2.0)
+            _supervisor = None
+
+    _startup_thread = threading.Thread(
+        target=initialize,
+        name="worker-supervisor-startup",
+        daemon=True,
+    )
+    _startup_thread.start()
 
 
 def start_supervisor() -> WorkerSupervisor | None:
@@ -77,7 +108,8 @@ def start_supervisor() -> WorkerSupervisor | None:
 
 
 def stop_supervisor(timeout: float = 10.0) -> None:
-    global _supervisor
+    global _supervisor, _shutdown_requested
+    _shutdown_requested = True
     if _supervisor is None:
         return
     try:
@@ -101,12 +133,14 @@ def status() -> dict:
     """
     supervisor = get_supervisor()
     if supervisor is None:
+        initializing = bool(_startup_thread and _startup_thread.is_alive())
         return {
             "enabled": False,
             "started_at": None,
             "reason": _disabled_reason
-            or "in-process workers are not running for this process",
+            or ("the worker supervisor is initializing" if initializing else "in-process workers are not running for this process"),
+            "initializing": initializing,
             "lease": {"held": False, "owner_id": None, "holder": None, "standby_reason": None},
             "consumers": [],
         }
-    return supervisor.status()
+    return {**supervisor.status(), "initializing": False}

@@ -559,3 +559,85 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
    label and the provenance line, because the number without the
    provenance is the thing this panel exists not to show. */
 .availability-value { display: block; margin: 2px 0 1px; color: var(--mct-ink); font-size: .95rem; font-weight: 700; }
+
+/* Public-release authentication. Google is the primary route; domain
+   credentials remain available without competing with the main action. */
+.auth-google { color: #fff; background: var(--mct-brand-blue); border-color: var(--mct-brand-blue); }
+.auth-google:hover { background: var(--mct-brand-blue-dark); }
+.auth-email-toggle {
+  width: 100%; display: flex; justify-content: space-between; align-items: center;
+  margin-top: 12px; padding: 10px 2px; color: var(--mct-ink); background: transparent;
+  border: 0; border-bottom: 1px solid var(--mct-border); cursor: pointer; font: inherit; font-weight: 650;
+}
+.auth-email-toggle:hover { color: var(--mct-brand-blue); }
+.password-signin { display: grid; gap: 12px; padding-top: 14px; }
+.password-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.password-input-row input { border-radius: 4px 0 0 4px; }
+.password-input-row button {
+  min-width: 58px; color: var(--mct-brand-blue); background: var(--mct-surface-alt);
+  border: 1px solid var(--mct-border-strong); border-left: 0; border-radius: 0 4px 4px 0;
+  cursor: pointer; font-size: .72rem; font-weight: 700;
+}
+.auth-reset { justify-self: start; padding: 2px 0; color: var(--mct-brand-blue); background: none; border: 0; cursor: pointer; font-weight: 650; }
+.auth-reset:disabled { color: var(--mct-muted); cursor: not-allowed; }
+.auth-reset-notice { margin: 0; color: var(--mct-muted); font-size: .72rem; line-height: 1.45; }
+.auth-access-details { margin-top: 14px; color: var(--mct-muted); font-size: .72rem; }
+.auth-access-details summary { cursor: pointer; color: var(--mct-ink); font-weight: 650; }
+.auth-access-details .access-levels { margin-top: 10px; }
+
+/* Immutable evidence report controls. */
+.report-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 14px;
+  padding: 10px; background: var(--mct-surface); border: 1px solid var(--mct-border); border-radius: 5px;
+}
+.report-error { flex-basis: 100%; color: var(--mct-danger); font-size: .72rem; }
+.report-progress { display: inline-flex; align-items: center; gap: 7px; color: var(--mct-muted); font-size: .7rem; }
+.report-progress progress { width: 110px; accent-color: var(--mct-brand-blue); }
+.print-frame { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.table-filters { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 10px; }
+.table-filters label { display: grid; gap: 4px; color: var(--mct-muted); font-size: .66rem; font-weight: 650; }
+.table-filters select { min-width: 150px; min-height: 32px; padding: 4px 28px 4px 8px; color: var(--mct-ink); background: #fff; border: 1px solid var(--mct-border-strong); border-radius: 4px; }
+
+/* Read-only assistant. The desktop drawer deliberately sits above the
+   contextual inspector; on small screens it becomes a full-screen sheet. */
+.assistant-launcher { position: fixed; z-index: 28; right: 22px; bottom: 20px; min-height: 42px; box-shadow: 0 8px 26px rgba(11,37,69,.2); }
+.assistant-drawer {
+  position: fixed; z-index: 40; inset: 48px 0 0 auto; width: min(420px, 100vw);
+  display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  color: var(--mct-ink); background: var(--mct-surface); border-left: 1px solid var(--mct-border);
+  box-shadow: -14px 0 40px rgba(40,31,25,.14);
+}
+.assistant-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px; border-bottom: 1px solid var(--mct-border); }
+.assistant-header h2 { margin: 2px 0 0; font-size: 1.05rem; }
+.assistant-boundary { margin: 12px 16px 8px; padding: 9px 10px; color: var(--mct-muted); background: var(--mct-surface-alt); border-left: 3px solid var(--mct-brand-blue); font-size: .7rem; line-height: 1.45; }
+.assistant-context { display: flex; align-items: center; gap: 8px; padding: 4px 16px 10px; color: var(--mct-muted); font-size: .72rem; }
+.assistant-messages { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 18px; }
+.assistant-empty { margin: auto; display: grid; justify-items: center; gap: 7px; padding: 28px 16px; color: var(--mct-muted); text-align: center; }
+.assistant-empty strong { color: var(--mct-ink); }
+.assistant-empty span { max-width: 32ch; font-size: .72rem; line-height: 1.5; }
+.assistant-message { max-width: 92%; padding: 9px 11px; border: 1px solid var(--mct-border); border-radius: 6px; background: #fff; }
+.assistant-message.user { align-self: flex-end; background: #eef3f8; border-color: #cfdae5; }
+.assistant-message small { color: var(--mct-muted); font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.assistant-message p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .78rem; line-height: 1.55; }
+.assistant-citations { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.assistant-citations button { padding: 3px 6px; color: var(--mct-brand-blue); background: transparent; border: 1px solid #b8c9da; border-radius: 4px; cursor: pointer; font-size: .65rem; }
+.assistant-retry { margin-top: 7px; padding: 3px 0; color: var(--mct-brand-blue); background: transparent; border: 0; cursor: pointer; font-size: .68rem; font-weight: 700; }
+.assistant-composer { display: grid; gap: 8px; padding: 12px 16px 16px; background: var(--mct-surface-alt); border-top: 1px solid var(--mct-border); }
+.assistant-composer textarea { width: 100%; resize: vertical; min-height: 74px; max-height: 180px; padding: 9px; color: var(--mct-ink); background: #fff; border: 1px solid var(--mct-border-strong); border-radius: 4px; font: inherit; }
+.assistant-composer > div { display: flex; justify-content: flex-end; gap: 7px; }
+.button-critical { color: var(--mct-danger); border-color: #dba7a3; }
+
+@media (max-width: 599px) {
+  .auth-page { padding: 12px; }
+  .auth-card { padding: 24px 20px; }
+  .assistant-launcher { right: 12px; bottom: 12px; }
+  .assistant-drawer { inset: 0; width: 100vw; height: 100dvh; border-left: 0; }
+  .assistant-message { max-width: 96%; }
+}
+
+@media print {
+  .command-bar, .start-nav, .assistant-launcher, .assistant-drawer, .report-actions { display: none !important; }
+  body { background: #fff; }
+  .workspace { padding: 0; }
+  .panel { break-inside: avoid; box-shadow: none; }
+}

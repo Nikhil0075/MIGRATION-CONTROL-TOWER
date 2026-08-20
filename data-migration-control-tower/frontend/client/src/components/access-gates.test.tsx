@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
 import { h } from "preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthenticationGate, NoAccessGate } from "./access-gates";
@@ -57,5 +57,28 @@ describe("sign-in hero", () => {
     // register for someone who has just been told they have no access.
     render(<NoAccessGate email="someone@example.internal" onSignOut={vi.fn()} />);
     expect(document.querySelector(".auth-art")).toBeNull();
+  });
+});
+
+describe("production authentication controls", () => {
+  it("keeps email access secondary and exposes password visibility on demand", () => {
+    render(<AuthenticationGate {...authProps} />);
+    expect(screen.queryByLabelText("Password")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Sign in with domain email/ }));
+    const password = screen.getByLabelText("Password") as HTMLInputElement;
+    expect(password.type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+    expect(password.type).toBe("text");
+    expect(screen.queryByText(/sign in as operator/i)).toBeNull();
+  });
+
+  it("returns an enumeration-safe password reset confirmation", async () => {
+    const onPasswordReset = vi.fn(async () => undefined);
+    render(<AuthenticationGate {...authProps} onPasswordReset={onPasswordReset} />);
+    fireEvent.click(screen.getByRole("button", { name: /Sign in with domain email/ }));
+    fireEvent.input(screen.getByLabelText("Domain email address"), { target: { value: "person@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
+    expect(await screen.findByText(/If the account is eligible/)).toBeTruthy();
+    expect(onPasswordReset).toHaveBeenCalledWith("person@example.test");
   });
 });

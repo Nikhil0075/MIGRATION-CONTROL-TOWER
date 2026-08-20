@@ -13,9 +13,9 @@ substitution/partial implementation · ❌ not attempted (with the reason).
 
 | Requirement | Satisfied by | Evidence artifact | Status |
 |---|---|---|---|
-| Gemini 3.5+ via Vertex AI | `gemini-3.5-flash` used by every reasoning-capable agent (ADK `model=` field) and `agents/orchestrator/recovery.py`'s root-cause narrative (direct Vertex AI call) | `infrastructure/seed_registry.py`'s `MODEL` constant; `agents/*/agent.py`'s `model="gemini-3.5-flash"`; `recovery.py::_try_gemini_narrative` | ✅ |
+| Gemini 3.5+ via Vertex AI | Bounded structured reasoning uses `gemini-3.7-flash` high for Discovery, Lineage and Planner; optional recovery explanation uses the same audited gateway; the read-only console assistant uses `gemini-3.5-flash` medium | `tools/model_gateway.py`; `frontend/assistant_service.py`; `infrastructure/seed_registry.py`; run-scoped `agent_execution_events` | ⚠️ implemented and locally contract-tested; the separately labelled live Vertex AI acceptance run is still a public-release gate |
 | At least one Google agent framework | Google ADK attempted first in every agent module, with a documented Rung-2 direct-tool-call fallback when `google-adk` isn't importable in this environment | Every `agents/*/agent.py`'s `try: from google.adk.agents import Agent` block; `AGENT_FRAMEWORK` variable records which one actually ran per process | ⚠️ ADK is real and preferred; the fallback is honestly labeled, not hidden |
-| At least one Google Cloud infrastructure service | Cloud Run (`hello-agent`, live), Firestore (Native mode, all state), Pub/Sub (12 topics, 7 subscriptions), BigQuery (migration target + scale-harness queries) | `infrastructure/gcp_setup.sh`; `evaluation/reports/cloud_deployment_evidence.md`'s live `gcloud run services describe` output | ✅ (Cloud Storage and Cloud Scheduler are not used — not needed for this estate's shape) |
+| At least one Google Cloud infrastructure service | Cloud Run (`hello-agent`, live), Firestore (state + TTL), Pub/Sub, BigQuery, Vertex AI and private Cloud Storage report artifacts | `infrastructure/gcp_setup.sh`; `evaluation/reports/cloud_deployment_evidence.md` | ⚠️ core services verified live previously; new Vertex AI reasoning/report-storage acceptance remains pending before public release |
 
 ## §26.2 Track 3 named capabilities
 

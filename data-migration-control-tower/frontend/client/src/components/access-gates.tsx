@@ -45,15 +45,20 @@ export function AuthenticationGate({
   error,
   onGoogleSignIn,
   onPasswordSignIn,
+  onPasswordReset,
 }: {
   configured: boolean;
   error?: string | null;
   onGoogleSignIn: () => Promise<void>;
   onPasswordSignIn: (email: string, password: string) => Promise<void>;
+  onPasswordReset?: (email: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState<"password" | "google" | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
 
   const run = async (provider: "password" | "google", action: () => Promise<void>) => {
     setBusy(provider);
@@ -69,7 +74,7 @@ export function AuthenticationGate({
   return (
     <main class="auth-page auth-page-hero">
       <div class="auth-shell">
-      <section class="auth-card" aria-labelledby="auth-title">
+      <section class="auth-card auth-card-primary" aria-labelledby="auth-title">
         <img
           class="brand-mark"
           src="/assets/brand/v1/logo-symbol.png"
@@ -79,12 +84,7 @@ export function AuthenticationGate({
         />
         <p class="eyebrow">Autonomous data migration</p>
         <h1 id="auth-title">Migration Control Tower</h1>
-        <p>
-          Secure operational access to migration estates, evidence, approvals,
-          and system health.
-        </p>
-
-        <AccessLevels />
+        <p>Governed migration operations, evidence and human-approved cutover in one secure workspace.</p>
 
         {error && (
           <div class="inline-alert danger" role="alert">
@@ -93,7 +93,30 @@ export function AuthenticationGate({
         )}
         {configured ? (
           <div class="auth-methods">
+            <button
+              class="button button-primary auth-action auth-google"
+              type="button"
+              disabled={busy !== null}
+              aria-busy={busy === "google"}
+              onClick={() => void run("google", onGoogleSignIn)}
+            >
+              <Icon name="user" /> {busy === "google" ? "Opening secure sign-in…" : "Continue with Google"}
+            </button>
+
+            <button
+              type="button"
+              class="auth-email-toggle"
+              aria-expanded={emailOpen}
+              aria-controls="email-signin-panel"
+              onClick={() => setEmailOpen(!emailOpen)}
+            >
+              Sign in with domain email
+              <span aria-hidden="true">{emailOpen ? "−" : "+"}</span>
+            </button>
+
+            {emailOpen && (
             <form
+              id="email-signin-panel"
               class="password-signin"
               aria-label="Domain email sign in"
               onSubmit={(event) => {
@@ -114,18 +137,24 @@ export function AuthenticationGate({
                   onInput={(event) => setEmail(event.currentTarget.value)}
                 />
               </label>
-              <label class="auth-field">
-                <span>Password</span>
-                <input
-                  type="password"
-                  name="password"
-                  value={password}
-                  autoComplete="current-password"
-                  required
-                  disabled={busy !== null}
-                  onInput={(event) => setPassword(event.currentTarget.value)}
-                />
-              </label>
+              <div class="auth-field">
+                <label htmlFor="control-tower-password">Password</label>
+                <span class="password-input-row">
+                  <input
+                    id="control-tower-password"
+                    type={showPassword ? "text" : "password"}
+                    name="password"
+                    value={password}
+                    autoComplete="current-password"
+                    required
+                    disabled={busy !== null}
+                    onInput={(event) => setPassword(event.currentTarget.value)}
+                  />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"}>
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </span>
+              </div>
               <button
                 class="button button-primary auth-action"
                 type="submit"
@@ -134,19 +163,24 @@ export function AuthenticationGate({
               >
                 <Icon name="user" /> {busy === "password" ? "Signing in…" : "Sign in with email"}
               </button>
+              {onPasswordReset && (
+                <button
+                  class="auth-reset"
+                  type="button"
+                  disabled={!email || busy !== null}
+                  onClick={() => {
+                    setResetNotice(null);
+                    void onPasswordReset(email)
+                      .catch(() => undefined)
+                      .finally(() => setResetNotice("If the account is eligible, password-reset instructions have been sent."));
+                  }}
+                >
+                  Forgot password?
+                </button>
+              )}
+              {resetNotice && <p class="auth-reset-notice" role="status">{resetNotice}</p>}
             </form>
-
-            <div class="auth-divider" role="separator"><span>or</span></div>
-
-            <button
-              class="button auth-action auth-google"
-              type="button"
-              disabled={busy !== null}
-              aria-busy={busy === "google"}
-              onClick={() => void run("google", onGoogleSignIn)}
-            >
-              <Icon name="user" /> {busy === "google" ? "Opening Google…" : "Continue with Google"}
-            </button>
+            )}
           </div>
         ) : (
           <div class="inline-alert warning" role="status">
@@ -155,9 +189,9 @@ export function AuthenticationGate({
           </div>
         )}
         <p class="auth-footnote">
-          Firebase confirms who you are. Roles are granted to the account by an
-          administrator and every dashboard action is audited.
+          Firebase verifies identity. Access is administrator-assigned and every operational action is audited.
         </p>
+        <details class="auth-access-details"><summary>Access levels</summary><AccessLevels /></details>
       </section>
       {/* Decorative, and hidden below 900px rather than squashed: the
           artwork is 142KB that a phone signing in does not need, and a

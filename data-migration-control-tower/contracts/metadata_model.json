@@ -669,8 +669,17 @@
             "name": {
               "type": "string"
             },
-            "temperature": {
-              "type": "number"
+            "provider": {
+              "type": "string"
+            },
+            "thinking_level": {
+              "enum": ["minimal", "low", "medium", "high"]
+            },
+            "prompt_version": {
+              "type": "string"
+            },
+            "output_schema_version": {
+              "type": "string"
             }
           }
         },

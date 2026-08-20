@@ -74,13 +74,25 @@ def _try_gemini_extraction(parts_builder, run_id: str | None = None) -> dict | N
     try:
         import os
 
-        import vertexai
-        from vertexai.generative_models import GenerativeModel
+        from google import genai
+        from google.genai import types
 
-        vertexai.init(project=os.environ["GCP_PROJECT_ID"], location="us-central1")
-        model = GenerativeModel(os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"))
+        model_name = os.environ.get("AGENT_REASONING_MODEL", "gemini-3.7-flash")
+        client = genai.Client(
+            vertexai=True,
+            project=os.environ["GCP_PROJECT_ID"],
+            location=os.environ.get("GOOGLE_CLOUD_LOCATION", "global"),
+            http_options=types.HttpOptions(api_version="v1"),
+        )
         content = parts_builder()
-        response = model.generate_content([content, _VISION_PROMPT])
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[content, _VISION_PROMPT],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_level="high"),
+            ),
+        )
         # Recorded before the response is parsed. The tokens were spent
         # whether or not the JSON turns out to be valid, and a cost that
         # only counts successful calls understates the real one.
@@ -88,10 +100,13 @@ def _try_gemini_extraction(parts_builder, run_id: str | None = None) -> dict | N
         if usage:
             record_model_usage(
                 run_id,
-                model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
+                model=model_name,
                 input_tokens=usage[0],
                 output_tokens=usage[1],
+                thinking_tokens=int(getattr(getattr(response, "usage_metadata", None), "thoughts_token_count", 0) or 0),
+                cached_tokens=int(getattr(getattr(response, "usage_metadata", None), "cached_content_token_count", 0) or 0),
                 purpose="discovery.documentation",
+                request_id=getattr(response, "response_id", None),
             )
         text = (response.text or "").strip()
         # Untrusted-content discipline (§23.1): model output is
@@ -133,15 +148,15 @@ def extract_documented_schema_from_pdf(pdf_path: str | Path, run_id: str | None 
 
 
 def _image_part(path: Path):
-    from vertexai.generative_models import Part
+    from google.genai import types
 
-    return Part.from_data(data=path.read_bytes(), mime_type="image/png")
+    return types.Part.from_bytes(data=path.read_bytes(), mime_type="image/png")
 
 
 def _pdf_part(path: Path):
-    from vertexai.generative_models import Part
+    from google.genai import types
 
-    return Part.from_data(data=path.read_bytes(), mime_type="application/pdf")
+    return types.Part.from_bytes(data=path.read_bytes(), mime_type="application/pdf")
 
 
 def _base_type(type_str: str) -> str:

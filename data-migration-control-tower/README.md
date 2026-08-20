@@ -84,6 +84,35 @@ in Firestore) — required before running the orchestrator, which resolves
 every actor by capability query against these cards, not by hardcoded
 import.
 
+### Public-release AI, reports and assistant gates
+
+The production hardening features are deliberately off by default:
+
+```bash
+ENABLE_AGENT_REASONING_V2=1   # Gemini 3.7 Flash high, structured + audited
+ENABLE_REPORTS=1              # private SHA-addressed PDF/JSON artifacts
+ENABLE_AI_ASSISTANT=1         # Gemini 3.5 Flash medium, read-only + cited
+REPORTS_BUCKET=<private-bucket-created-by-gcp-setup>
+GOOGLE_CLOUD_LOCATION=global
+```
+
+Do not enable them publicly until the live acceptance run passes. The setup
+script grants Vertex AI only to model-running identities, creates the private
+report bucket with retention, and enables 30-day Firestore TTL for assistant
+data. The console never stores chain-of-thought: it exposes final rationale,
+evidence references, tool outcomes, validation state, model/token usage and
+fallback status in the Agents decision trail.
+
+Reports are generated asynchronously from persisted run evidence and are
+downloaded only through authenticated estate-scoped API routes. The global
+assistant is read-only; it has no operation or approval tools.
+
+Before testing a public hostname, add that exact hostname in Firebase
+Authentication → Settings → Authorized domains and include its HTTPS origin in
+`UI_ALLOWED_ORIGINS`. Keep `localhost` and `127.0.0.1` authorized for local
+acceptance. The application CSP limits the Firebase popup/redirect flow to the
+required Google origins; it does not weaken `script-src` for arbitrary CDNs.
+
 ### 3. Day 1 — hello-agent
 
 ```bash

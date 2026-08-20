@@ -29,7 +29,7 @@ logger = logging.getLogger("planner_agent")
 
 AGENT_ID = "planner-agent"
 AGENT_POLICY_KEY = "planner"
-AGENT_VERSION = "0.1.0"
+AGENT_VERSION = "2.0.0"
 
 RUN_COLLECTION = "migration_runs"
 
@@ -146,6 +146,40 @@ def propose_plan(run_id: str) -> dict:
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
+    from tools.model_gateway import PlannerReasoning, generate_structured
+
+    evidence_refs = [str(table.get("table_id")) for table in tables if table.get("table_id")]
+    reasoning = generate_structured(
+        run_id=run_id,
+        agent_id=AGENT_ID,
+        capability="planner.reason.sequence",
+        stage="PLANNER",
+        instruction=(
+            "Explain the deterministic migration plan's sequence, risks and evidence in operator language. "
+            "Do not change target scope, scheduling, policy outcomes, plan hash or rollback controls."
+        ),
+        payload={
+            "plan_hash": plan_hash,
+            "steps": steps,
+            "targets": targets,
+            "risk_findings": risk_findings,
+            "dependencies": dependencies,
+            "allowed_evidence_refs": evidence_refs,
+        },
+        output_schema=PlannerReasoning,
+        evidence_refs=evidence_refs,
+        tool_calls=[
+            {"tool": "build_steps", "status": "COMPLETED"},
+            {"tool": "build_targets", "status": "COMPLETED"},
+            {"tool": "compute_plan_hash", "status": "COMPLETED"},
+        ],
+        required=True,
+        agent_version=AGENT_VERSION,
+        generated_artifact_refs=["migration_plan/current.ai_rationale"],
+    )
+    if reasoning is not None:
+        plan["ai_rationale"] = reasoning.model_dump()
+
     run_ref.collection("migration_plan").document("current").set(plan)
 
     logger.info(
@@ -169,7 +203,7 @@ try:
 
     planner_agent = Agent(
         name=AGENT_ID.replace("-", "_"),
-        model="gemini-3.5-flash",
+        model="gemini-3.7-flash",
         description=(
             "Proposes a migration plan: target table names, execution "
             "order, SQL translation notes for dialect-incompatible "
