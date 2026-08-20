@@ -191,9 +191,47 @@ const fixtureByPath: Record<string, unknown> = {
   },
 };
 
-async function installApiFixtures(page: Page) {
+/** Per-path deviation from the default fixtures, for a single test. */
+type FixtureOverride = {
+  /** Replaces the `data` envelope body. */
+  body?: unknown;
+  /** Holds the response open, to make a transient UI state observable. */
+  delayMs?: number;
+};
+
+/**
+ * Installs the API fixtures, optionally deviating on specific paths.
+ *
+ * Overrides go THROUGH this handler rather than through a second
+ * `page.route`, because Playwright matches routes last-registered-first:
+ * a test that registers its own route before calling this one is silently
+ * overridden by the catch-all below, the page never reaches the state the
+ * test was written for, and the assertions fail somewhere unrelated. That
+ * cost a real misdiagnosis — an empty element was read as a bundling bug
+ * when the page had simply already loaded. One handler, one order, no
+ * trap.
+ */
+async function installApiFixtures(
+  page: Page,
+  overrides: Record<string, FixtureOverride> = {},
+) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
+    const override = overrides[url.pathname];
+    if (override?.delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, override.delayMs));
+    }
+    if (override && "body" in override) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: override.body,
+          meta: { generated_at: generatedAt, freshness: "live" },
+        }),
+      });
+      return;
+    }
     const data = url.pathname === "/api/v1/config"
       ? {
           product_name: "Migration Control Tower",
@@ -468,21 +506,15 @@ test("an operator can pause a consumer from System Health", async ({ page }) => 
 test("the workers panel names the reason when nothing is consuming", async ({ page }) => {
   // "Queued but nothing is happening" was the confusion this whole change
   // exists to remove. An empty table would reproduce it exactly.
-  await installApiFixtures(page);
-  await page.route("**/api/v1/workers", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        data: {
-          enabled: false,
-          reason: "CONTROL_TOWER_WORKERS is set to off for this process",
-          lease: { held: false, standby_reason: null },
-          consumers: [],
-        },
-        meta: { generated_at: generatedAt, freshness: "live" },
-      }),
-    });
+  await installApiFixtures(page, {
+    "/api/v1/workers": {
+      body: {
+        enabled: false,
+        reason: "CONTROL_TOWER_WORKERS is set to off for this process",
+        lease: { held: false, standby_reason: null },
+        consumers: [],
+      },
+    },
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/system-health");
@@ -637,18 +669,14 @@ test("an approval bound to a changed plan is flagged before cutover", async ({ p
 test("the loading screen holds attention with facts, not invented progress", async ({ page }) => {
   // Captured by holding the API open, because the state is otherwise too
   // brief to inspect — which is also why it was never designed.
-  await installApiFixtures(page);
-  // AFTER the fixtures, deliberately: Playwright matches routes
-  // last-registered-first, so registering this before installApiFixtures
-  // lets its catch-all answer instantly and the page never shows a
-  // loading state at all.
-  await page.route("**/api/v1/incidents**", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 4000));
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ data: { incidents: [], policy_denials: [], open_count: 0 }, meta: { generated_at: generatedAt, freshness: "live" } }),
-    });
+  await installApiFixtures(page, {
+    "/api/v1/incidents": {
+      // Held open so the loading state is observable at all; it is
+      // otherwise too brief to inspect, which is why it had never been
+      // designed.
+      delayMs: 4000,
+      body: { incidents: [], policy_denials: [], open_count: 0 },
+    },
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/incidents");
