@@ -685,3 +685,58 @@ def test_a_succeeded_operation_does_not_keep_the_previous_attempt_s_error(monkey
     assert "error" in done[-1] and done[-1]["error"] is None, (
         "a succeeded operation must clear the failed attempt's error"
     )
+
+
+# ---------------------------------------------------------------------------
+# Read shape of the aggregate endpoints
+# ---------------------------------------------------------------------------
+
+
+def test_independent_scans_are_overlapped_not_sequential():
+    """The bottleneck is round trips, not documents.
+
+    Measured against a real off-region project: four sequential
+    collection-group scans cost 7.91s and the same four overlapped cost
+    4.62s. Reading FEWER documents was tried twice and was slower both
+    times — per-run reads for 84 runs took 7.7s against a 3.3s scan, and
+    per-run count() aggregations took 11.7s because each aggregation is
+    its own ~2.2s round trip. So the shape that matters is "few queries,
+    run together", and this pins it.
+    """
+    import inspect
+
+    from frontend import api_v1
+
+    for endpoint in (api_v1.approvals, api_v1.incidents, api_v1.policies):
+        source = inspect.getsource(endpoint)
+        assert "_gather(" in source, (
+            f"{endpoint.__name__} runs its independent reads one after another"
+        )
+
+
+def test_gather_actually_runs_work_concurrently():
+    import time
+
+    from frontend.api_v1 import _gather
+
+    def slow(value):
+        time.sleep(0.25)
+        return value
+
+    started = time.perf_counter()
+    result = _gather({str(i): (lambda v=i: slow(v)) for i in range(6)})
+    elapsed = time.perf_counter() - started
+
+    assert result == {str(i): i for i in range(6)}
+    # Sequentially this is 1.5s; overlapped it is one sleep plus overhead.
+    assert elapsed < 0.9, f"gather serialised its work: {elapsed:.2f}s"
+
+
+def test_gather_surfaces_a_failure_rather_than_returning_a_hole():
+    from frontend.api_v1 import _gather
+
+    def explode():
+        raise RuntimeError("firestore is unreachable")
+
+    with pytest.raises(RuntimeError, match="unreachable"):
+        _gather({"ok": lambda: 1, "bad": explode})
