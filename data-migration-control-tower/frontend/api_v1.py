@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import hashlib
 import json
 import math
 import os
@@ -11,6 +12,7 @@ import re
 import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar, copy_context
 from pathlib import Path
 from typing import Any, Literal
 
@@ -20,7 +22,12 @@ from pydantic import BaseModel, Field
 
 from agents.orchestrator.run_lifecycle import RUN_COLLECTION, get_run, transition_state
 from frontend.operations import get_operation, queue_operation, record_wave_override
-from frontend.security import UserContext, authorize_estate, get_user_context, require_role
+from frontend.security import (
+    UserContext,
+    authorize_estate,
+    get_user_context,
+    require_role,
+)
 from tools import approval_service
 from tools.connection_context import DEFAULT_ESTATE_ID
 from tools.firestore_client import get_client
@@ -37,8 +44,33 @@ FIREBASE_CONFIG_PATH = REPO_ROOT / "frontend" / "static" / "firebase-config.js"
 #                  /evaluations has always read Firestore. A filesystem read
 #                  here would not have survived a stateless Cloud Run deploy.
 
+async def _scope_reads(user: UserContext = Depends(get_user_context)) -> None:
+    """Pin every read on this router to the caller's estates, by default.
+
+    `_authorize_read` sets the same scope, but only for endpoints that
+    remember to call it. This is the fail-safe half: it runs for every
+    route on `router`, so an endpoint added tomorrow that forgets is
+    scoped anyway. Forgetting can now only make a read too NARROW, which
+    is visible, rather than too wide, which is not.
+
+    `async def` on purpose. Sync endpoints run in a worker thread with a
+    COPY of this request's context, so a context variable set here is
+    visible to them — one set in a sync dependency would be set in a
+    different copy and lost. The registry read that resolves the grant is
+    handed to a thread so it does not block the event loop; only the
+    `.set()` happens here, which is where it has to happen.
+    """
+    from starlette.concurrency import run_in_threadpool
+
+    _READ_SCOPE.set(await run_in_threadpool(_visible_estate_ids, user))
+
+
 public_router = APIRouter(prefix="/api/v1", tags=["v1-public"])
-router = APIRouter(prefix="/api/v1", tags=["v1"], dependencies=[Depends(require_role("viewer"))])
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["v1"],
+    dependencies=[Depends(require_role("viewer")), Depends(_scope_reads)],
+)
 
 
 class Meta(BaseModel):
@@ -212,6 +244,27 @@ _response_cache: dict[str, tuple[float, dict]] = {}
 _cache_generation = 0
 
 
+#: Estates the CURRENT request may read; `None` means unrestricted, which
+#: covers both a wildcard grant and internal calls with no request behind
+#: them (scripts, workers, tests). Set once per request by
+#: `_authorize_read`. A context variable, not a parameter, so that a read
+#: helper cannot be called from a request path without it.
+_READ_SCOPE: ContextVar[frozenset[str] | None] = ContextVar("read_scope", default=None)
+
+
+def _scope_key() -> str:
+    """A stable cache-key fragment for the current scope.
+
+    Without this the response cache is a cross-tenant leak: two users with
+    different grants hit the same key and the second is served the first
+    one's rows.
+    """
+    scope = _READ_SCOPE.get()
+    if scope is None:
+        return "*"
+    return hashlib.sha256("".join(sorted(scope)).encode()).hexdigest()[:12]
+
+
 def _cached(key: str, build) -> dict:
     """Serves a recent response and SAYS so.
 
@@ -222,6 +275,7 @@ def _cached(key: str, build) -> dict:
     """
     if _CACHE_TTL_SECONDS <= 0:
         return build()
+    key = f"{_scope_key()}|{key}"
     hit = _response_cache.get(key)
     if hit and time.monotonic() < hit[0]:
         payload = hit[1]
@@ -304,7 +358,15 @@ def _for_estate(records: list[dict], estate_id: str | None) -> list[dict]:
     treating them as unmatched would empty the Control Tower dashboard
     between deploying this filter and running scripts/backfill_estate_id.py
     — a silent, confusing regression for a purely cosmetic filter.
+
+    The estate filter is cosmetic; the scope filter applied first is not.
+    `estate_id` is what the caller ASKED for, `_READ_SCOPE` is what the
+    caller is ALLOWED, and the two are enforced in that order so that
+    omitting the request filter can never widen the result.
     """
+    scope = _READ_SCOPE.get()
+    if scope is not None:
+        records = [r for r in records if (r.get("estate_id") or DEFAULT_ESTATE_ID) in scope]
     if estate_id is None:
         return records
     return [r for r in records if (r.get("estate_id") or DEFAULT_ESTATE_ID) == estate_id]
@@ -353,8 +415,14 @@ def _gather(work: dict[str, Any], max_workers: int = 16) -> dict[str, Any]:
     trips. Measured — sequential per-run reads for two dozen runs cost
     seconds; overlapped they cost one round trip plus change.
     """
+    # Each read runs under a COPY of the calling context. A pool thread
+    # starts with an empty context, so without this the reads overlapped
+    # here would see `_READ_SCOPE` unset and return every estate's data —
+    # the pool would quietly undo the authorization the caller just did.
+    # A fresh copy per submission because one Context cannot be entered
+    # twice concurrently.
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {key: pool.submit(fn) for key, fn in work.items()}
+        futures = {key: pool.submit(copy_context().run, fn) for key, fn in work.items()}
         return {key: future.result() for key, future in futures.items()}
 
 
@@ -508,16 +576,51 @@ def _operation_progress(operation: dict) -> dict:
 
 
 def _authorize_read(user: UserContext, estate_id: str | None) -> None:
+    """Authorize a read AND pin the estates it is allowed to touch.
+
+    Authorizing `estate_id` used to be all this did, which meant an
+    UNSCOPED read authorized nothing: `if estate_id:` is false when the
+    caller passes no filter, so every aggregate returned data from every
+    estate in the project. That was not an edge case — `estatePath()` in
+    the console omits the scope whenever no estate is active, which it is
+    on first load, so unscoped was the default path.
+
+    The permitted set is published on a context variable rather than
+    threaded through thirteen endpoint signatures, because the point is to
+    close the hole for endpoints that do NOT exist yet. Every runs-based
+    read already funnels through `_for_estate`, and every estate list
+    through `_all_estates`; filtering there means a new aggregate is
+    scoped whether or not its author remembered to be.
+    """
     if estate_id:
         authorize_estate(user, estate_id, "viewer")
+    # Redundant with the `_scope_reads` router dependency for HTTP calls,
+    # and deliberately so: it also covers an endpoint invoked as a plain
+    # function, where no dependency has run.
+    _READ_SCOPE.set(_visible_estate_ids(user))
 
 
-def _visible_estate_ids(user: UserContext) -> set[str]:
-    return {
+def _visible_estate_ids(user: UserContext) -> frozenset[str] | None:
+    """Every estate this user may read, or `None` for an unrestricted grant.
+
+    `None` rather than "the set of every estate that exists right now": a
+    wildcard holder must still see a run whose estate document has since
+    been deleted, and enumerating estates would silently drop it. It also
+    keeps the common case free of a per-request estate listing.
+
+    Reads the registry directly rather than through `_all_estates`, which
+    is itself scoped — computing the scope from a scoped read would be
+    circular.
+    """
+    if "viewer" in user.roles_for(None):
+        return None
+    from tools.connection_context import list_estate_documents
+
+    return frozenset(
         str(estate.get("estate_id"))
-        for estate in _all_estates()
+        for estate in list_estate_documents()
         if estate.get("estate_id") and user.has_role("viewer", str(estate.get("estate_id")))
-    }
+    )
 
 
 def _wave_state(estate_id: str | None = None) -> dict:
@@ -661,7 +764,11 @@ def _estate(estate_id: str | None = None) -> dict:
 def _all_estates() -> list[dict]:
     from tools.connection_context import list_estate_documents
 
-    return sorted(list_estate_documents(), key=lambda e: e.get("estate_id", ""))
+    estates = sorted(list_estate_documents(), key=lambda e: e.get("estate_id", ""))
+    scope = _READ_SCOPE.get()
+    if scope is not None:
+        estates = [e for e in estates if str(e.get("estate_id")) in scope]
+    return estates
 
 
 def _packs() -> list[dict]:
@@ -1326,10 +1433,10 @@ def runs(
     _authorize_read(user, estate_id)
     # Only the Firestore read is cached; filtering, sorting and paging stay
     # live so a changed query never returns a stale page.
+    # `_all_runs` is scoped by `_READ_SCOPE` now, so the hand-rolled
+    # visible-estate filter that used to live here would be a second copy
+    # of the same rule — and it was the ONLY endpoint that had one.
     items = _cached(f"runs-source:{estate_id}", lambda: _envelope(_all_runs(500, estate_id=estate_id)))["data"]
-    if estate_id is None:
-        visible = _visible_estate_ids(user)
-        items = [run for run in items if (run.get("estate_id") or DEFAULT_ESTATE_ID) in visible]
     if state_filter:
         items = [run for run in items if run.get("state") == state_filter]
     if mode:
