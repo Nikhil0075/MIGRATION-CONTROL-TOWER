@@ -25,6 +25,7 @@
 
 import { h } from "preact";
 import { AGENT_IDENTITY, agentIdentity } from "./agents";
+import { Icon } from "./icons";
 
 export type StageStatus = "complete" | "active" | "waiting" | "failed" | "retrying";
 
@@ -128,9 +129,11 @@ export function OrchestrationMap({
               {identity ? (
                 <img src={identity.art} alt="" aria-hidden="true" width={compact ? 28 : 40} height={compact ? 28 : 40} />
               ) : (
-                // No icon: the data plane is not an agent, and giving it
-                // one would be the misrepresentation this map avoids.
-                <span class="orchestration-node-plain" aria-hidden="true" />
+                // A flow glyph, not an agent tile. The data plane is not
+                // an agent and must not look like one — but a blank grey
+                // square reads as a failed image rather than as a
+                // deliberate distinction, which is how it was reported.
+                <Icon name="waves" size={compact ? 18 : 22} />
               )}
             </span>
             <span class="orchestration-text">

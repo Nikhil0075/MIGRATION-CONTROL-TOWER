@@ -119,3 +119,45 @@ describe("release build", () => {
     expect(source).not.toContain("playwright-operator");
   });
 });
+
+describe("CSS custom properties", () => {
+  it("defines every --oj-c-* token the JET components reference", () => {
+    // An undefined custom property resolves to nothing, and a colour that
+    // resolves to nothing is transparent — so the component renders,
+    // reports the right value, and is invisible. That has now happened
+    // twice: a BOM once nulled every --mct-* token and produced a
+    // white-on-white sign-in button, and the shipped Redwood 20.1.3 CSS
+    // defines ZERO --oj-c-* tokens while oj-c's own component styles
+    // reference seven, which made the progress bar's track and fill
+    // transparent. Neither failure raises anything anywhere.
+    const appCss = readFileSync(join(SRC, "styles", "app.css"), "utf8");
+    const componentCss = readdirSync(
+      resolve(SRC, "..", "node_modules", "@oracle", "oraclejet-core-pack", "oj-c"),
+      { withFileTypes: true },
+    );
+    void componentCss;
+
+    const defined = new Set([...appCss.matchAll(/(--oj-c-[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+    // The tokens observed in the built bundle. Kept explicit so a new one
+    // appearing in a future oj-c version fails here rather than silently
+    // rendering as nothing.
+    const required = [
+      "--oj-c-measure-fill-enabled",
+      "--oj-c-measure-track-enabled",
+      "--oj-c-border-divider",
+      "--oj-c-border-enabled",
+      "--oj-c-border-keyboard-focus",
+      "--oj-c-boxshadow-shadowcolor",
+      "--oj-c-surface-neutral10",
+    ];
+    const missing = required.filter((token) => !defined.has(token));
+    expect(missing).toEqual([]);
+  });
+
+  it("leaves no --mct-* token referenced but undefined", () => {
+    const appCss = readFileSync(join(SRC, "styles", "app.css"), "utf8");
+    const defined = new Set([...appCss.matchAll(/(--mct-[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+    const used = new Set([...appCss.matchAll(/var\(\s*(--mct-[a-z0-9-]+)/g)].map((m) => m[1]));
+    expect([...used].filter((token) => !defined.has(token))).toEqual([]);
+  });
+});

@@ -14,6 +14,25 @@
   --mct-brand-blue-dark: #1558a8;
   --mct-brand-teal: #17a2a2;
 
+  /* Oracle JET core-pack (oj-c) design tokens.
+     The shipped Redwood 20.1.3 stylesheet defines ZERO --oj-c-* tokens,
+     while oj-c's own component CSS references seven of them. An undefined
+     custom property resolves to nothing, so oj-c-progress-bar rendered
+     its track and its fill with `background-color: transparent` — the bar
+     reported the right value, sized its fill element correctly, and was
+     simply invisible. Reported as "the number is right but the bar never
+     moves", and it is the same failure mode as the BOM that once nulled
+     every --mct-* token.
+     Mapped to the brand palette rather than to Redwood defaults, so the
+     progress fill matches the rest of the console. */
+  --oj-c-measure-fill-enabled: var(--mct-brand-blue);
+  --oj-c-measure-track-enabled: #e4e1dc;
+  --oj-c-border-divider: var(--mct-border);
+  --oj-c-border-enabled: var(--mct-border-strong);
+  --oj-c-border-keyboard-focus: var(--mct-brand-blue);
+  --oj-c-boxshadow-shadowcolor: rgba(11, 37, 69, .16);
+  --oj-c-surface-neutral10: var(--mct-surface-alt);
+
   --mct-ink: #161513;
   --mct-muted: #625f5a;
   --mct-border: #dedbd5;
@@ -371,7 +390,10 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
   border-radius: 12px; background: var(--mct-surface); border: 2px solid var(--mct-border-strong);
 }
 .orchestration-node img { border-radius: 8px; }
-.orchestration-node-plain { width: 22px; height: 22px; border-radius: 4px; background: var(--mct-neutral); }
+/* The data plane marker: a flow glyph in the neutral ink, deliberately
+   NOT an agent tile. It must read as "not an agent", never as a missing
+   image. */
+.orchestration-node .mct-icon { color: var(--mct-neutral); }
 .orchestration-stage.is-complete .orchestration-node { border-color: var(--mct-success); }
 .orchestration-stage.is-active .orchestration-node { border-color: var(--agent-accent, var(--mct-brand-blue)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, var(--mct-brand-blue)) 22%, transparent); }
 .orchestration-stage.is-failed .orchestration-node { border-color: var(--mct-danger); }

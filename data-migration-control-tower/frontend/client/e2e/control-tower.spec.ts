@@ -772,3 +772,55 @@ test("lineage draws relationships instead of a grid of identical cards", async (
   // The graph is an image, so it carries a text alternative.
   await expect(page.getByRole("img", { name: /relationship register/i })).toBeVisible();
 });
+
+
+test("the lifecycle progress bar actually fills to its value", async ({ page }) => {
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+
+  // The bar's own value was never wrong — it sized its fill element
+  // correctly all along. Both the track and the fill drew with
+  // `background-color: transparent`, because oj-c's stylesheet colours
+  // them from --oj-c-measure-* tokens that the shipped Redwood 20.1.3 CSS
+  // does not define, and an undefined custom property resolves to
+  // nothing. So this asserts PAINT, not value: a bar that reports 100%
+  // and renders invisibly is the exact bug being guarded.
+  // Wait for the custom element to upgrade and lay out. Measured before
+  // that, its children are 0x0 with an empty computed background, which
+  // is indistinguishable from the unpainted bug this test exists to catch.
+  const bar = page.locator("oj-c-progress-bar").first();
+  await expect(bar).toBeVisible();
+  await expect
+    .poll(async () => (await bar.boundingBox())?.width ?? 0, { timeout: 10_000 })
+    .toBeGreaterThan(10);
+
+  const painted = await bar.evaluate((el: any) =>
+    Array.from(el.querySelectorAll("*")).map((child: any) => {
+      const rect = child.getBoundingClientRect();
+      return {
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        background: getComputedStyle(child).backgroundColor,
+      };
+    }),
+  );
+
+  // Not "something in the bar is painted" — the TRACK alone would satisfy
+  // that, and a grey track at 100% is indistinguishable from the bug. The
+  // fill is the innermost element and is the one that has to carry the
+  // brand blue, at full width because this run's progress is 100%.
+  const fill = painted[painted.length - 1];
+  expect(fill, `the bar has no fill element: ${JSON.stringify(painted)}`).toBeTruthy();
+  expect(fill.background, `the fill is not painted: ${JSON.stringify(painted)}`).toBe("rgb(29, 111, 208)");
+  expect(fill.width).toBeGreaterThan(200);
+
+  // The screenshot baselines cannot be trusted to catch this on their own:
+  // a 6px-tall band across a full-page capture is ~0.003 of the pixels,
+  // comfortably inside `maxDiffPixelRatio: 0.01`. The bar could go fully
+  // transparent again and every snapshot would stay green.
+  const track = painted[painted.length - 2];
+  expect(track.background).not.toBe(fill.background);
+});
+
