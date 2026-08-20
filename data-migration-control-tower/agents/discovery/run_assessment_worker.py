@@ -58,10 +58,16 @@ def handle_assessment_requested(payload: dict) -> dict:
                     merge=True,
                 )
 
+        # The run this operation already started, if a previous delivery
+        # of this same message got that far. Pub/Sub redelivers on nack,
+        # and without this every attempt created a fresh run and orphaned
+        # the last one in REQUESTED — ten attempts, ten runs, one command.
+        previous = operation_ref.get().to_dict() if operation_ref else None
         report = run_assessment(
             str(REPO_ROOT / payload["pack_path"]),
             estate_id=payload.get("estate_id"),
             on_run_created=_attach_run,
+            reuse_run_id=(previous or {}).get("run_id"),
         )
         if operation_ref:
             operation_ref.update(

@@ -916,3 +916,68 @@ test("a long run's stage timeline scrolls in its panel instead of widening the p
   expect(measured.clientWidth).toBeLessThanOrEqual(measured.panelWidth);
   expect(measured.documentScrollWidth).toBe(measured.documentClientWidth);
 });
+
+test("an action dialog stays inside the viewport wherever its button sits", async ({ page }) => {
+  // Reported from Dead letters, where the Replay/Archive buttons sit in a
+  // grid starting near the left margin. The panel was `position: absolute;
+  // right: 0`, so it grew 360px leftward from the trigger and ran off
+  // under the navigation rail — the first characters of every line were
+  // unreadable.
+  // Twelve messages, because the bug needs the buttons to WRAP: with one
+  // row the single action sits on the right, where the old right-aligned
+  // panel happened to fit. The reported screen had a grid of them
+  // reaching the left margin.
+  await installApiFixtures(page, {
+    "/api/v1/dead-letters": {
+      body: {
+        pending: Array.from({ length: 12 }, (_, index) => ({
+          message_id: `2081${String(index).padStart(4, "0")}`,
+          source_subscription: "plan-created-sub",
+          delivery_attempts: 10,
+          published_at: generatedAt,
+          run_id: `run-stuck-${index}`,
+          payload: { run_id: `run-stuck-${index}` },
+          attributes: {},
+        })),
+        archive: [],
+      },
+    },
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/dead-letters");
+  await expect(page.getByRole("heading", { name: "Dead letters", exact: true })).toBeVisible();
+
+  const triggers = page.getByRole("button", { name: /^Replay |^Archive / });
+  await expect(triggers.first()).toBeVisible();
+  const count = await triggers.count();
+  expect(count, "no dead-letter actions to open").toBeGreaterThan(4);
+
+  for (let index = 0; index < count; index += 1) {
+    const trigger = triggers.nth(index);
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click();
+
+    const panel = page.getByRole("dialog").first();
+    await expect(panel).toBeVisible();
+    const box = (await panel.boundingBox())!;
+
+    expect(box.x, `dialog ${index} starts off the left edge`).toBeGreaterThanOrEqual(0);
+    expect(
+      box.x + box.width,
+      `dialog ${index} runs past the right edge`,
+    ).toBeLessThanOrEqual(1440);
+    expect(box.y, `dialog ${index} starts above the viewport`).toBeGreaterThanOrEqual(0);
+    expect(
+      box.y + box.height,
+      `dialog ${index} runs past the bottom edge`,
+    ).toBeLessThanOrEqual(900);
+
+    // It must also clear the navigation rail, which is what actually
+    // obscured the text — being inside the viewport was not enough.
+    const rail = await page.locator(".app-nav, nav").first().boundingBox();
+    if (rail) expect(box.x).toBeGreaterThanOrEqual(rail.x + rail.width - 1);
+
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+  }
+});

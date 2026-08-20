@@ -634,7 +634,61 @@ export function ActionForm({
   const [operationId, setOperationId] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLFormElement>(null);
+  const [placement, setPlacement] = useState<{ top: number; left: number } | null>(null);
   const progress = useOperationProgress(operationId, progressPollIntervalMs);
+
+  // The panel used to be `position: absolute; right: 0` — anchored to the
+  // trigger's right edge and growing 360px leftward. That is fine for a
+  // button on the right of a page and wrong everywhere else: on Dead
+  // letters the Replay/Archive buttons sit in a grid starting near the
+  // left margin, so the panel ran off under the navigation rail and its
+  // first few characters of every line were unreadable.
+  //
+  // Measured against the VIEWPORT instead, and clamped into it. Kept as a
+  // popover rather than promoted to a centred modal because the reader
+  // needs to see which row's button they pressed; a modal would cover it.
+  useEffect(() => {
+    if (!open) {
+      setPlacement(null);
+      return;
+    }
+    const place = () => {
+      const trigger = triggerRef.current?.getBoundingClientRect();
+      const panel = panelRef.current?.getBoundingClientRect();
+      if (!trigger || !panel) return;
+      const margin = 12;
+      // Clamped to the CONTENT column, not to the window. Clamping to the
+      // window still slid the panel under the navigation rail — inside
+      // the viewport, and still unreadable, which is the bug as it was
+      // actually reported. A dialog belonging to a row in the workspace
+      // stays in the workspace.
+      const content = document.getElementById("main-content")?.getBoundingClientRect();
+      const minLeft = Math.max(margin, (content?.left ?? 0) + margin);
+      const maxLeft =
+        Math.min(window.innerWidth, content?.right ?? window.innerWidth) - panel.width - margin;
+      // Prefer right-aligned with the trigger, as before; fall back to
+      // whatever keeps the whole panel in that column.
+      const preferred = trigger.right - panel.width;
+      const left = Math.max(minLeft, Math.min(preferred, Math.max(minLeft, maxLeft)));
+      // Flip above the trigger when there is no room below it.
+      const below = trigger.bottom + 6;
+      const top =
+        below + panel.height + margin > window.innerHeight && trigger.top - panel.height - 6 > margin
+          ? trigger.top - panel.height - 6
+          : Math.max(margin, Math.min(below, window.innerHeight - panel.height - margin));
+      setPlacement({ top, left });
+    };
+    place();
+    window.addEventListener("resize", place);
+    // Capture phase: the panel has to follow a scroll in any container,
+    // not only the document, and scroll does not bubble.
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, message, operationId]);
+
   useEffect(() => {
     if (!open) return;
     const close = (event: KeyboardEvent | MouseEvent) => {
@@ -674,7 +728,20 @@ export function ActionForm({
         {title}
       </button>
       {open && (
-        <form ref={panelRef} onSubmit={submit} role="dialog" aria-label={title}>
+        <form
+          ref={panelRef}
+          onSubmit={submit}
+          role="dialog"
+          aria-label={title}
+          // Hidden for the first paint only: the panel has to exist to be
+          // measured, and showing it at its unplaced position first is a
+          // visible jump.
+          style={
+            placement
+              ? { top: `${placement.top}px`, left: `${placement.left}px` }
+              : { visibility: "hidden" }
+          }
+        >
           <p>{description}</p>
           <label>
             Justification

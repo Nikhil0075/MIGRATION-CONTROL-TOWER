@@ -166,7 +166,7 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 .header-action-cluster, .page-actions, .form-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .header-action-cluster > select, .page-actions > select { min-height: 34px; max-width: 260px; padding: 5px 8px; border: 1px solid var(--mct-border-strong); border-radius: 4px; background: #fff; }
 .action-form { position: relative; }
-.action-form form { position: absolute; z-index: 8; top: calc(100% + 6px); right: 0; width: min(360px, calc(100vw - 24px)); padding: 14px; background: #fff; border: 1px solid var(--mct-border-strong); border-radius: 5px; box-shadow: 0 12px 34px rgba(30,24,20,.18); }
+.action-form form { position: fixed; z-index: 30; width: min(360px, calc(100vw - 24px)); padding: 14px; background: #fff; border: 1px solid var(--mct-border-strong); border-radius: 5px; box-shadow: 0 12px 34px rgba(30,24,20,.18); }
 .action-form form > p { margin: 0 0 10px; color: var(--mct-muted); font-size: .76rem; }
 .action-form form label { display: grid; gap: 5px; color: var(--mct-muted); font-size: .75rem; }
 .action-form textarea { min-height: 86px; padding: 8px; border: 1px solid var(--mct-border-strong); border-radius: 3px; resize: vertical; }

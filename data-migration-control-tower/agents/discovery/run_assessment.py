@@ -32,7 +32,12 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(REPO_ROOT / ".env")
 
 from agents.lineage.agent import build_dependency_graph  # noqa: E402
-from agents.orchestrator.run_lifecycle import create_run, transition_state, write_catalog  # noqa: E402
+from agents.orchestrator.run_lifecycle import (  # noqa: E402
+    create_run,
+    get_run,
+    transition_state,
+    write_catalog,
+)
 from agents.planner.agent import propose_plan  # noqa: E402
 from agents.risk.agent import classify_estate, verify_pii_access_boundary  # noqa: E402
 from tools.pack_loader import binding_for_estate_pack, build_adapter_for_estate, load_pack  # noqa: E402
@@ -46,11 +51,40 @@ REPORTS_DIR = REPO_ROOT / "evaluation" / "reports"
 _NO_CORPUS_PLACEHOLDER = "simulator/source_setup/_no_corpus_for_this_pack"
 
 
+def _reusable(run_id: str | None) -> str | None:
+    """The run from a previous attempt, if it never got anywhere.
+
+    `create_run` happens before `discover_tables`, which is the step that
+    actually fails — a source that is down, a credential that expired, a
+    connection that times out. The worker then nacks, Pub/Sub redelivers
+    the same message, and this function ran again and created ANOTHER
+    run. At ten delivery attempts that is ten runs for one command, nine
+    of them abandoned in REQUESTED forever. Twenty-nine such runs were
+    found on one estate in the live project, and they are not merely
+    untidy: the console picks the newest run to show lineage for, so an
+    abandoned empty run made the Lineage page render blank.
+
+    Only a run still in REQUESTED is reused. One that got as far as
+    DISCOVERED and failed later cannot be replayed through this function
+    at all — `transition_state` refuses DISCOVERED -> DISCOVERED, by
+    design — so that case still starts a fresh run and leaves the partial
+    one as the evidence it is.
+    """
+    if not run_id:
+        return None
+    try:
+        run = get_run(run_id)
+    except KeyError:
+        return None
+    return run_id if run.get("state") == "REQUESTED" else None
+
+
 def run_assessment(
     pack_path: str,
     *,
     estate_id: str | None = None,
     on_run_created: Callable[[str], None] | None = None,
+    reuse_run_id: str | None = None,
 ) -> dict:
     pack = load_pack(pack_path)
     binding = binding_for_estate_pack(pack, estate_id)
@@ -58,7 +92,8 @@ def run_assessment(
 
     print(f"[assessment] pack={pack['pack_id']!r} v{pack['version']}, source={adapter.system!r}")
 
-    run_id = create_run(
+    reused = _reusable(reuse_run_id)
+    run_id = reused or create_run(
         pack["pack_id"],
         mode="assessment",
         estate_id=estate_id,
@@ -67,7 +102,10 @@ def run_assessment(
     )
     if on_run_created:
         on_run_created(run_id)
-    print(f"[assessment] created run: {run_id} (mode=assessment)")
+    if reused:
+        print(f"[assessment] retrying run: {run_id} (mode=assessment)")
+    else:
+        print(f"[assessment] created run: {run_id} (mode=assessment)")
 
     tables = adapter.discover_tables()
     pipelines = adapter.discover_pipelines()

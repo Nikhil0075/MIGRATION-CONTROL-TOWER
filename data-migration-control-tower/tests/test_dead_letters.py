@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 
+import types
+
 import pytest
 
 from tools import dead_letters as dlq
@@ -660,6 +662,13 @@ def test_a_succeeded_operation_does_not_keep_the_previous_attempt_s_error(monkey
 
         def update(self, data):
             written.append(dict(data))
+
+        def get(self):
+            # The worker reads the operation back to find the run a
+            # previous delivery started, so it can reuse it instead of
+            # creating another (see tests/test_assessment_retry.py). This
+            # operation has no earlier attempt.
+            return types.SimpleNamespace(exists=False, to_dict=lambda: None)
 
     class FakeCollection:
         def document(self, _id):
