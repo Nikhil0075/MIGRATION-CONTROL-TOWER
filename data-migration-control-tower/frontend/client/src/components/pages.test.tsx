@@ -3,7 +3,7 @@ import { h } from "preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, api } from "../api";
 import { AGENT_IDENTITY } from "./agents";
-import { EmptyState, LOADING_FACTS, LifecycleProgress, LoadingState, PageRouter, StatusPill } from "./pages";
+import { EmptyState, LOADING_FACTS, LifecycleProgress, LoadingState, PageRouter, StatusPill, formatBytes } from "./pages";
 import { formatValue, statusTone } from "../status";
 
 vi.mock("../api", async (importOriginal) => ({
@@ -655,5 +655,78 @@ describe("access that was refused", () => {
     await vi.waitFor(() =>
       expect(screen.queryByText("Onboarding an estate requires the operator role.")).toBeNull(),
     );
+  });
+});
+
+describe("cost and volume evidence", () => {
+  it("shows the measured figure, not only that a measurement exists", async () => {
+    // The panel rendered status and reason only, so a measurement that
+    // became available had nowhere to appear and the row still read as
+    // empty.
+    mockApi({
+      "/api/v1/overview": {
+        fleet_health: "HEALTHY",
+        estate: { objects: 48, pipelines: 0, sources: [] },
+        runs: { latest: null, migrated_percent: 0, complete: 0, active: 0 },
+        waves: {},
+        latency: {},
+        estimated_cost: { status: "not_configured", reason: "Not yet recorded." },
+        actual_cost: { status: "not_configured", reason: "Not configured." },
+        estimated_bytes: {
+          status: "available",
+          reason: "Measured from the source catalog for all 48 discovered tables.",
+          value: { bytes: 403_619_840, tables_measured: 48, tables_total: 48, complete: true },
+        },
+      },
+    });
+    render(<PageRouter {...pageProps} route="overview" activeEstateId="wwi-demo-estate" />);
+
+    expect(await screen.findByText("384.9 MiB")).toBeTruthy();
+    // The provenance stays next to the number. A volume figure with no
+    // statement of where it came from is what this panel exists to avoid.
+    expect(screen.getByText(/all 48 discovered tables/)).toBeTruthy();
+  });
+
+  it("shows no figure for a measurement that is not available", async () => {
+    mockApi({
+      "/api/v1/overview": {
+        fleet_health: "HEALTHY",
+        estate: { objects: 0, pipelines: 0, sources: [] },
+        runs: { latest: null, migrated_percent: 0, complete: 0, active: 0 },
+        waves: {},
+        latency: {},
+        estimated_cost: { status: "not_configured", reason: "Not yet recorded.", value: null },
+        actual_cost: { status: "not_configured", reason: "Not configured.", value: null },
+        estimated_bytes: { status: "not_configured", reason: "Nothing discovered.", value: null },
+      },
+    });
+    render(<PageRouter {...pageProps} route="overview" activeEstateId="e" />);
+
+    await screen.findByText("Nothing discovered.");
+    expect(document.querySelectorAll(".availability-value")).toHaveLength(0);
+  });
+});
+
+describe("formatBytes", () => {
+  it.each([
+    [0, "0 B"],
+    [512, "512 B"],
+    [1024, "1.00 KiB"],
+    [403_619_840, "384.9 MiB"],
+    [1_099_511_627_776, "1.00 TiB"],
+  ])("renders %s as %s", (bytes, expected) => {
+    expect(formatBytes(bytes as number)).toBe(expected);
+  });
+
+  it("uses 1024-based units, because that is what the sources report", () => {
+    // SQL Server counts 8 KiB pages; Postgres reports block multiples.
+    // Labelling those with decimal units would restate a measured number
+    // as a slightly wrong one — 403,619,840 is 384.9 MiB, not 403.6 MB.
+    expect(formatBytes(403_619_840)).not.toBe("403.62 MB");
+  });
+
+  it("says so rather than inventing a figure for a non-measurement", () => {
+    expect(formatBytes(Number.NaN)).toBe("Not measured");
+    expect(formatBytes(-1)).toBe("Not measured");
   });
 });

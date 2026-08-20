@@ -1018,6 +1018,70 @@ def overview(
     return _cached(f"overview:{estate_id}", lambda: _build_overview(estate_id))
 
 
+def _estimated_bytes(catalog: list[dict]) -> dict:
+    """How many bytes the discovered estate occupies at the source.
+
+    Summed from what each adapter read out of the source's own catalog
+    during discovery — sys.allocation_units on SQL Server,
+    pg_total_relation_size on Postgres — not sampled, and not inferred
+    from row counts.
+
+    Coverage is reported alongside the total, because a partial answer
+    presented as a whole one is the failure this panel exists to prevent.
+    An adapter with no live database to ask (a .sql corpus) records null
+    rather than 0, so a total drawn from a mixed estate is a floor, and
+    says so.
+    """
+    if not catalog:
+        return Availability(
+            status="not_configured",
+            reason="No estate has been discovered yet, so there is nothing to measure.",
+        ).model_dump()
+
+    measured = [
+        int(table["size_bytes"])
+        for table in catalog
+        if isinstance(table.get("size_bytes"), (int, float))
+    ]
+    if not measured:
+        return Availability(
+            status="not_configured",
+            reason=(
+                f"None of the {len(catalog)} discovered tables reported a size. "
+                f"Re-run discovery: sources catalogued before byte measurement "
+                f"existed carry no size_bytes."
+            ),
+        ).model_dump()
+
+    total = sum(measured)
+    complete = len(measured) == len(catalog)
+    return Availability(
+        status="available",
+        reason=(
+            f"Measured from the source catalog for all {len(catalog)} discovered tables."
+            if complete
+            else (
+                f"Measured for {len(measured)} of {len(catalog)} discovered tables. "
+                f"The rest have no live source to report a size, so this is a floor."
+            )
+        ),
+        last_observed_at=max(
+            (str(table.get("discovered_at")) for table in catalog if table.get("discovered_at")),
+            default=None,
+        ),
+        value={
+            "bytes": total,
+            "tables_measured": len(measured),
+            "tables_total": len(catalog),
+            "largest_table": max(
+                (t for t in catalog if isinstance(t.get("size_bytes"), (int, float))),
+                key=lambda t: t["size_bytes"],
+            ).get("table_id"),
+            "complete": complete,
+        },
+    ).model_dump()
+
+
 def _build_overview(estate_id: str | None) -> dict:
     """Overview reads ten independent things from Firestore.
 
@@ -1073,6 +1137,7 @@ def _build_overview(estate_id: str | None) -> dict:
             "executions": pool.submit(_latest_sub("migration_executions")),
             "incidents": pool.submit(_latest_sub("incidents")),
             "approvals": pool.submit(_latest_sub("approval_history")),
+            "catalog": pool.submit(_latest_sub("catalog")),
             "wave_state": pool.submit(lambda: _wave_state(estate_id)),
         }
         resolved = {name: future.result() for name, future in futures.items()}
@@ -1085,6 +1150,7 @@ def _build_overview(estate_id: str | None) -> dict:
     incidents = resolved["incidents"]
     approvals = resolved["approvals"]
     wave_state = resolved["wave_state"]
+    estimated_bytes = _estimated_bytes(resolved["catalog"])
     latest_execution = executions[-1] if executions else None
     progress = None
     if latest_execution and latest_execution.get("source_count"):
@@ -1128,7 +1194,7 @@ def _build_overview(estate_id: str | None) -> dict:
                     else "CLOUD_BILLING_EXPORT_TABLE is not configured."
                 ),
             ).model_dump(),
-            "estimated_bytes": Availability(status="not_configured", reason="Source byte estimates are not recorded.").model_dump(),
+            "estimated_bytes": estimated_bytes,
         }
     )
 

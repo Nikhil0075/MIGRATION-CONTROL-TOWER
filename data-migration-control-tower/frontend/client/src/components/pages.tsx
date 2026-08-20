@@ -776,6 +776,31 @@ export function ActionForm({
   );
 }
 
+/** Bytes as a human reads them — 1024-based, because that is what the
+ *  source engines report: SQL Server counts 8 KiB pages and Postgres
+ *  reports block multiples. Labelling those with decimal units would
+ *  restate a measured number as a slightly wrong one. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "Not measured";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 ? value : value.toFixed(value < 10 ? 2 : 1)} ${units[unit]}`;
+}
+
+function formatMeasure(label: string, value: any): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object" && typeof value.bytes === "number")
+    return formatBytes(value.bytes);
+  if (typeof value === "object" && typeof value.amount === "number")
+    return `${value.currency || "USD"} ${value.amount.toFixed(2)}`;
+  return String(value);
+}
+
 function OverviewPage({ onInspect, activeEstateId }: PageProps) {
   const [refresh, setRefresh] = useState(0);
   const state = useResource<RecordRow>(estatePath("/api/v1/overview", activeEstateId), refresh);
@@ -879,6 +904,13 @@ function OverviewPage({ onInspect, activeEstateId }: PageProps) {
                     <StatusPill value={item.status} />
                     <span>
                       <strong>{label}</strong>
+                      {/* The measurement itself, when there is one. The
+                          panel used to render only status and reason, so
+                          a measurement that became available had nowhere
+                          to appear and the row still read as empty. */}
+                      {item.status === "available" && (
+                        <b class="availability-value">{formatMeasure(label, item.value)}</b>
+                      )}
                       <small>{item.reason}</small>
                     </span>
                   </button>

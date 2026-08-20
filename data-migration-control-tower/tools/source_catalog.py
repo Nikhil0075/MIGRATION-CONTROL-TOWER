@@ -80,6 +80,7 @@ def catalog_sql_server_tables(conn: pyodbc.Connection, database: str = "WideWorl
         columns = _sql_server_columns(cursor, schema_name, table_name)
         pk = _sql_server_primary_key(cursor, schema_name, table_name)
         row_count = _sql_server_row_count_estimate(cursor, schema_name, table_name)
+        size_bytes = _sql_server_size_bytes(cursor, schema_name, table_name)
 
         record = {
             "table_id": f"sqlserver-wwi.{database}.{schema_name}.{table_name}",
@@ -89,6 +90,7 @@ def catalog_sql_server_tables(conn: pyodbc.Connection, database: str = "WideWorl
             "table": table_name,
             "classification": "UNCLASSIFIED",
             "row_count_baseline": row_count,
+            "size_bytes": size_bytes,
             "primary_key": pk,
             "columns": columns,
             "discovered_at": _now(),
@@ -149,6 +151,39 @@ def _sql_server_row_count_estimate(cursor, schema_name: str, table_name: str) ->
         JOIN sys.tables t ON t.object_id = p.object_id
         JOIN sys.schemas s ON s.schema_id = t.schema_id
         WHERE s.name = ? AND t.name = ? AND p.index_id IN (0, 1)
+        """,
+        schema_name,
+        table_name,
+    )
+    row = cursor.fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def _sql_server_size_bytes(cursor, schema_name: str, table_name: str) -> int | None:
+    """Bytes this table occupies, from the engine's own allocation metadata.
+
+    Asked of sys.allocation_units rather than measured by reading the
+    table: this has to run over every table during discovery, and a
+    COUNT-style scan of a large estate would make discovery cost more
+    than the migration it is planning. A page is 8 KB, which is a fixed
+    property of the storage engine, not a guess.
+
+    `used_pages` rather than `total_pages` — total includes space
+    allocated but not yet written, which would overstate what actually
+    has to move.
+
+    Returns None rather than 0 when the engine reports nothing, because
+    the console distinguishes "no bytes" from "not measured", and a table
+    that failed to report is not an empty table.
+    """
+    cursor.execute(
+        """
+        SELECT SUM(a.used_pages) * 8192
+        FROM sys.allocation_units a
+        JOIN sys.partitions p ON p.partition_id = a.container_id
+        JOIN sys.tables t ON t.object_id = p.object_id
+        JOIN sys.schemas s ON s.schema_id = t.schema_id
+        WHERE s.name = ? AND t.name = ?
         """,
         schema_name,
         table_name,
@@ -228,6 +263,10 @@ def catalog_oracle_corpus(path: str | Path) -> list[dict]:
                 "table": table_name,
                 "classification": "UNCLASSIFIED",
                 "row_count_baseline": None,
+                # A .sql script corpus has no stored bytes to report. Null,
+                # never 0: the console distinguishes "not measured" from
+                # "measured as empty", and a DDL file is not an empty table.
+                "size_bytes": None,
                 "primary_key": primary_key,
                 "columns": columns,
                 "discovered_at": _now(),
@@ -348,6 +387,17 @@ def catalog_postgres_tables(conn, database: str, system: str = "postgres") -> li
         estimate = cursor.fetchone()
         row_count = max(0, int(estimate[0])) if estimate and estimate[0] is not None else None
 
+        # Total relation size: the heap plus its indexes and TOAST, which
+        # is what the table actually occupies. pg_relation_size alone
+        # would report only the heap and understate a heavily indexed
+        # table by a wide margin.
+        cursor.execute(
+            "SELECT pg_total_relation_size(to_regclass(%s))",
+            (f"{schema_name}.{table_name}",),
+        )
+        measured = cursor.fetchone()
+        size_bytes = int(measured[0]) if measured and measured[0] is not None else None
+
         record = {
             "table_id": f"{system}.{database}.{schema_name}.{table_name}",
             "system": system,
@@ -356,6 +406,7 @@ def catalog_postgres_tables(conn, database: str, system: str = "postgres") -> li
             "table": table_name,
             "classification": "UNCLASSIFIED",
             "row_count_baseline": row_count,
+            "size_bytes": size_bytes,
             "primary_key": primary_key,
             "columns": columns,
             "discovered_at": _now(),
