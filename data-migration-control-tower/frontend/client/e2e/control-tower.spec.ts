@@ -722,13 +722,25 @@ test("the loading screen holds attention with facts, not invented progress", asy
     const box = await page.locator(selector).first().boundingBox();
     return box ? Math.round(box.x + box.width / 2) : -1;
   };
-  const [fleetC, statusC, factC] = await Promise.all([
+  const [fleetC, statusC, factC, barC] = await Promise.all([
     centre(".loading-fleet"),
     centre(".loading-status span"),
     centre(".loading-fact"),
+    // The BAR, not its wrapper. The wrapper was 220px and correctly
+    // centred the whole time; the bar inside it was held at 320px by a
+    // `min-width` written for the page body, overflowed the wrapper to
+    // the right, and sat 50px off the line the other three share.
+    // Measuring the wrapper is what let that survive.
+    centre(".loading-bar oj-c-progress-bar"),
   ]);
   expect(Math.abs(fleetC - statusC)).toBeLessThanOrEqual(2);
   expect(Math.abs(fleetC - factC)).toBeLessThanOrEqual(2);
+  expect(Math.abs(fleetC - barC)).toBeLessThanOrEqual(2);
+
+  // And it must actually fit the wrapper, not merely be centred in it.
+  const wrapper = await page.locator(".loading-bar").boundingBox();
+  const bar = await page.locator(".loading-bar oj-c-progress-bar").boundingBox();
+  expect(bar!.width).toBeLessThanOrEqual(wrapper!.width);
 
   await page.screenshot({ path: "test-results/loading-state.png" });
 });
@@ -824,3 +836,55 @@ test("the lifecycle progress bar actually fills to its value", async ({ page }) 
   expect(track.background).not.toBe(fill.background);
 });
 
+
+
+
+test("a long run's stage timeline scrolls in its panel instead of widening the page", async ({
+  page,
+}) => {
+  // A run that recovered from a defect passes through 17 states. At
+  // ~145px each that is 2,679px of timeline, and `.stage-timeline`
+  // carried `min-width: max-content` on the SAME element as
+  // `overflow-x: auto` — so it grew to fit its content rather than
+  // scrolling it, and pushed the panel and the page off the right edge
+  // of the screen.
+  await installApiFixtures(page, {
+    "/api/v1/runs/run-live": {
+      body: {
+        run: {
+          run_id: "run-live",
+          state: "COMPLETE",
+          estate_id: "wwi-demo-estate",
+          state_history: [
+            "REQUESTED", "DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED", "MIGRATING",
+            "VALIDATING", "FAILED", "INVESTIGATING", "REMEDIATING", "VALIDATING", "PASSED",
+            "READY_FOR_APPROVAL", "APPROVED", "CUTOVER", "MONITORING", "COMPLETE",
+          ].map((state, index) => ({ state, at: `2026-08-17T09:${String(index).padStart(2, "0")}:00Z` })),
+          progress: { percent: 100, status: "complete", label: "Migration complete" },
+        },
+        stage_metrics: [],
+      },
+    },
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/runs/run-live");
+
+  const timeline = page.locator(".stage-timeline");
+  await expect(timeline).toBeVisible();
+  await expect(timeline.locator("li")).toHaveCount(17);
+
+  const measured = await timeline.evaluate((el: HTMLElement) => ({
+    clientWidth: el.clientWidth,
+    scrollWidth: el.scrollWidth,
+    panelWidth: (el.parentElement as HTMLElement).clientWidth,
+    documentScrollWidth: document.documentElement.scrollWidth,
+    documentClientWidth: document.documentElement.clientWidth,
+  }));
+
+  // The content is genuinely wider than the panel — otherwise this test
+  // would pass on a timeline short enough never to have had the bug.
+  expect(measured.scrollWidth).toBeGreaterThan(measured.clientWidth + 200);
+  // …and it is the LIST that scrolls, not the page that widens.
+  expect(measured.clientWidth).toBeLessThanOrEqual(measured.panelWidth);
+  expect(measured.documentScrollWidth).toBe(measured.documentClientWidth);
+});

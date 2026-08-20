@@ -53,7 +53,15 @@
 
 * { box-sizing: border-box; }
 html, body, app-root, .mct-app { min-height: 100%; margin: 0; font-family: "Oracle Sans", "Segoe UI", Arial, sans-serif !important; }
-body, .oj-body, oj-c-drawer-layout, oj-c-progress-bar { min-width: 320px; background: var(--mct-canvas); font-family: "Oracle Sans", "Segoe UI", Arial, sans-serif !important; }
+/* `min-width: 320px` is a floor for the PAGE and its layout containers.
+   oj-c-progress-bar was in this list too, which meant no progress bar
+   anywhere could be narrower than 320px — it silently overflowed any
+   smaller container to the right instead of fitting it. That is what
+   pushed the loading bar off the centre line, and it is why
+   `.lifecycle-progress oj-c-progress-bar` needed a 160px override to
+   fit inside a card at all. A bar takes the width it is given. */
+body, .oj-body, oj-c-drawer-layout { min-width: 320px; background: var(--mct-canvas); font-family: "Oracle Sans", "Segoe UI", Arial, sans-serif !important; }
+oj-c-progress-bar { background: var(--mct-canvas); font-family: "Oracle Sans", "Segoe UI", Arial, sans-serif !important; }
 button, input, select, textarea { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
@@ -170,7 +178,9 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 .progress-caption { color: var(--mct-muted); font-size: .72rem; }
 .progress-caption small { white-space: nowrap; }
 .lifecycle-progress.compact .progress-caption small { display: none; }
-.lifecycle-progress oj-c-progress-bar { min-width: 160px; }
+/* Was 160px purely to claw back some of the global 320px floor above,
+   which no longer exists. A bar in a card should fill the card. */
+.lifecycle-progress oj-c-progress-bar { width: 100%; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
 .form-field { display: grid; gap: 5px; color: var(--mct-muted); font-size: .76rem; }
 .form-field.full { grid-column: 1 / -1; }
@@ -250,8 +260,14 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 .latency-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 8px; }
 .latency-card { display: grid; gap: 3px; padding: 10px; border: 1px solid var(--mct-border); border-radius: 4px; background: var(--mct-surface-alt); text-align: left; cursor: pointer; }
 .latency-card span, .latency-card small { color: var(--mct-muted); font-size: .71rem; }
-.stage-timeline { display: flex; min-width: max-content; list-style: none; margin: 0; padding: 4px 2px 8px; overflow-x: auto; }
-.stage-timeline li { position: relative; min-width: 145px; display: flex; gap: 8px; align-items: flex-start; padding-right: 18px; }
+/* `min-width: max-content` used to sit here, on the SAME element as
+   `overflow-x: auto`. That is self-defeating: the element grows to fit its
+   content instead of scrolling it, so a 16-state run pushed the panel —
+   and the page — past the right edge of the screen. The scroll container
+   must be free to be narrower than what it holds; the items are what
+   refuse to shrink. */
+.stage-timeline { display: flex; list-style: none; margin: 0; padding: 4px 2px 10px; overflow-x: auto; overscroll-behavior-x: contain; }
+.stage-timeline li { position: relative; flex: 0 0 auto; min-width: 145px; display: flex; gap: 8px; align-items: flex-start; padding-right: 18px; }
 .stage-timeline li::after { content: ""; position: absolute; z-index: 0; top: 13px; left: 25px; right: 0; height: 1px; background: var(--mct-border-strong); }
 .stage-timeline li:last-child::after { display: none; }
 .stage-timeline li > span { position: relative; z-index: 1; width: 27px; height: 27px; display: grid; place-items: center; flex: 0 0 auto; border: 2px solid var(--mct-success); border-radius: 50%; background: #fff; font-size: .68rem; font-weight: 700; }
@@ -458,6 +474,13 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
 .page-state-rich { flex-direction: column; gap: 16px; min-height: 300px; padding: 32px 20px; text-align: center; }
 .loading-status { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .loading-bar { width: 220px; max-width: 100%; }
+/* The wrapper was already 220px and already centred; the bar inside it
+   was not. It was held at 320px by a global `min-width` meant for the
+   page, so it overflowed the wrapper by 100px to the right and sat 50px
+   off the centre line the fleet, the message and the fact all share.
+   Constraining the wrapper could never move a child with a larger
+   minimum than the wrapper itself. */
+.loading-bar oj-c-progress-bar { display: block; width: 100%; }
 
 .loading-fleet { display: flex; gap: 8px; align-items: center; justify-content: center; }
 .loading-fleet img { width: 34px; height: 34px; border-radius: 8px; opacity: .32; }
