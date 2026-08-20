@@ -460,3 +460,51 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
   .loading-fleet img { animation: loading-fleet-pulse 2.6s ease-in-out infinite; }
   .loading-fact { animation: loading-fact-in .5s ease-out; }
 }
+
+/* Lineage graph (Day 11 Phase 16).
+   Replaces a flat grid of identical cards that drew no relationships at
+   all. Connected assets carry the visual weight; everything else is a
+   chip below, because 42 of 48 assets having no edges is the finding. */
+.lineage-graph-scroll { overflow-x: auto; padding: 4px 2px 10px; background-image: radial-gradient(#dfdcd6 1px, transparent 1px); background-size: 18px 18px; }
+/* Natural size, not stretched. `min-width: 100%` made the browser scale
+   the viewBox to the container and centre it, which left dead space on
+   both sides of a small graph and shrank a wide one. The scroll container
+   is what handles overflow. */
+.lineage-graph { display: block; }
+
+.lineage-edge { fill: none; stroke: var(--mct-border-strong); stroke-width: 1.6; color: var(--mct-border-strong); }
+.lineage-edge.is-active { stroke: var(--mct-brand-blue); color: var(--mct-brand-blue); stroke-width: 2.4; }
+.lineage-edge.is-dim { opacity: .25; }
+
+.lineage-g-node rect { fill: var(--mct-surface); stroke: var(--mct-border-strong); stroke-width: 1.4; }
+.lineage-g-node { cursor: pointer; }
+.lineage-g-node:focus-visible { outline: none; }
+.lineage-g-node:focus-visible rect { stroke: var(--mct-brand-blue); stroke-width: 3; }
+.lineage-g-node:hover rect { stroke: var(--mct-brand-blue); }
+.lineage-g-label { font-size: .78rem; font-weight: 650; fill: var(--mct-ink); }
+.lineage-g-meta { font-size: .62rem; fill: var(--mct-muted); }
+/* PII is the one classification with consequences, so it is the one that
+   changes the node's appearance rather than only its caption. */
+.lineage-g-node.is-pii rect { stroke: var(--mct-warning); stroke-width: 2; }
+.lineage-g-node.is-pii .lineage-g-meta { fill: var(--mct-warning); font-weight: 650; }
+/* Dashed: referenced by a relationship but absent from the catalog. */
+.lineage-g-node.is-unresolved rect { stroke-dasharray: 4 3; fill: var(--mct-surface-alt); }
+.lineage-g-node.is-unresolved .lineage-g-label { fill: var(--mct-muted); }
+.lineage-g-node.is-dim { opacity: .3; }
+
+.asset-chips { display: grid; gap: 16px; }
+.asset-chip-group h3 { margin: 0 0 7px; font-size: .74rem; color: var(--mct-ink); text-transform: uppercase; letter-spacing: .06em; }
+.asset-chip-group h3 small { margin-left: 6px; color: var(--mct-muted); font-weight: 500; letter-spacing: 0; }
+.asset-chip-group ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.asset-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; cursor: pointer;
+  background: var(--mct-surface-alt); border: 1px solid var(--mct-border); border-radius: 999px;
+  font-size: .72rem; color: var(--mct-ink);
+}
+.asset-chip:hover { border-color: var(--mct-brand-blue); background: var(--mct-surface); }
+.asset-chip.is-pii { border-color: color-mix(in srgb, var(--mct-warning) 55%, transparent); }
+.chip-tag { padding: 0 5px; border-radius: 3px; background: var(--mct-warning); color: #fff; font-size: .58rem; font-weight: 700; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .lineage-edge, .lineage-g-node rect { transition: stroke .18s ease, opacity .18s ease; }
+}

@@ -1,6 +1,7 @@
 import { h } from "preact";
 import { useState } from "preact/hooks";
 import { Icon } from "./icons";
+import { LineageGraph } from "./lineage-graph";
 import {
   DataTable,
   EmptyState,
@@ -32,12 +33,19 @@ export function LineagePage(props: PageProps) {
   const [filter, setFilter] = useState("ALL");
   const availableRuns: any[] = state.data?.available_runs || [];
   const edges = state.data?.edges || [];
+  const linked = new Set<string>(edges.flatMap((edge: any) => [edge.from, edge.to]));
   const nodes = (state.data?.nodes || []).filter(
     (node: any) =>
       filter === "ALL" ||
       node.classification === filter ||
       node.type === filter.toLowerCase(),
   );
+  const unconnected = nodes.filter((node: any) => !linked.has(node.id));
+  const bySchema: Record<string, any[]> = {};
+  for (const node of unconnected) {
+    const schema = String(node.label || node.id).split(".")[0] || "other";
+    (bySchema[schema] ||= []).push(node);
+  }
   return (
     <>
       <PageHeader
@@ -79,32 +87,60 @@ export function LineagePage(props: PageProps) {
             title="Lineage graph"
             subtitle={
               state.data.run_id
-                ? `${nodes.length} visible nodes · ${edges.length} relationships · run ${state.data.run_id}`
+                ? `${nodes.length - unconnected.length} related of ${nodes.length} assets · ${edges.length} relationships · run ${state.data.run_id}`
                 : "No run in this estate has been discovered yet, so there is nothing to draw."
             }
             className="lineage-panel"
           >
-            <div class="lineage-canvas" role="list" aria-label="Lineage assets">
-              {nodes.map((node: any) => (
-                <button
-                  role="listitem"
-                  class={`lineage-node node-${node.type}`}
-                  onClick={() =>
-                    props.onInspect("Lineage asset", {
-                      ...node,
-                      relationships: edges.filter(
-                        (edge: any) =>
-                          edge.from === node.id || edge.to === node.id,
-                      ),
-                    })
-                  }
-                >
-                  <Icon name={node.type === "pipeline" ? "runs" : "estates"} />
-                  <strong>{node.label}</strong>
-                  <small>{node.classification || node.type}</small>
-                </button>
-              ))}
-            </div>
+            <LineageGraph
+              nodes={nodes}
+              edges={edges}
+              onSelect={(node: any) =>
+                props.onInspect("Lineage asset", {
+                  ...node,
+                  relationships: edges.filter(
+                    (edge: any) => edge.from === node.id || edge.to === node.id,
+                  ),
+                })
+              }
+            />
+          </Panel>
+
+          {/* The assets with no discovered relationships. Deliberately a
+              dense list rather than cards the same size as the graph
+              nodes: 42 of 48 tables were unconnected in the observed run,
+              and giving each one a large card buried the six edges that
+              are the actual lineage. */}
+          <Panel
+            title="Catalogued, no relationships found"
+            subtitle="Discovered assets that nothing in this run links to or from."
+          >
+            {!unconnected.length ? (
+              <p class="empty-state">Every catalogued asset appears in the graph.</p>
+            ) : (
+              <div class="asset-chips">
+                {Object.entries(bySchema).map(([schema, items]: [string, any]) => (
+                  <div class="asset-chip-group" key={schema}>
+                    <h3>
+                      {schema} <small>{items.length}</small>
+                    </h3>
+                    <ul>
+                      {items.map((node: any) => (
+                        <li key={node.id}>
+                          <button
+                            class={`asset-chip ${node.classification === "PII" ? "is-pii" : ""}`}
+                            onClick={() => props.onInspect("Lineage asset", node)}
+                          >
+                            {String(node.label).split(".").slice(1).join(".") || node.label}
+                            {node.classification === "PII" && <span class="chip-tag">PII</span>}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
           </Panel>
           <Panel title="Relationship register">
             <DataTable

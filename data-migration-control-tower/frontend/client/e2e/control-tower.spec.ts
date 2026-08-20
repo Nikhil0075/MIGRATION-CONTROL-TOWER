@@ -71,8 +71,22 @@ const fixtureByPath: Record<string, unknown> = {
     // The endpoint now reports WHICH run it drew, and offers the runs that
     // actually have a catalog — a queued run has none.
     run_id: "run-live",
-    nodes: [{ id: "source.orders", label: "Orders", classification: "PII", confidence: 0.98 }],
-    edges: [],
+    // Mirrors the real shape: a few connected assets, one endpoint the
+    // catalog does not contain, and a majority with no relationships.
+    nodes: [
+      { id: "Sales.Orders", label: "Sales.Orders", type: "table", classification: "METADATA" },
+      { id: "Sales.Customers", label: "Sales.Customers", type: "table", classification: "PII" },
+      { id: "Sales.V_ACCOUNT_SUMMARY", label: "Sales.V_ACCOUNT_SUMMARY", type: "table", classification: "METADATA" },
+      { id: "Application.People", label: "Application.People", type: "table", classification: "PII" },
+      { id: "Application.Cities", label: "Application.Cities", type: "table", classification: "METADATA" },
+      { id: "Warehouse.ColdRoomTemperatures", label: "Warehouse.ColdRoomTemperatures", type: "table", classification: "METADATA" },
+      { id: "Purchasing.Suppliers", label: "Purchasing.Suppliers", type: "table", classification: "PII" },
+    ],
+    edges: [
+      { from: "Sales.Orders", to: "Sales.V_ACCOUNT_SUMMARY", relationship: "reads", confidence: 0.85, source: "sql_view_parse" },
+      { from: "Sales.Customers", to: "Sales.V_ACCOUNT_SUMMARY", relationship: "reads", confidence: 0.85, source: "sql_view_parse" },
+      { from: "Application.People", to: "wwi.sales.customers", relationship: "reads", confidence: 1, source: "dag_reference" },
+    ],
     available_runs: [
       { run_id: "run-live", state: "COMPLETE", created_at: generatedAt },
       { run_id: "run-older", state: "PASSED", created_at: generatedAt },
@@ -720,4 +734,26 @@ test("lineage names the run it drew and lets an operator pick another", async ({
   const picker = page.getByLabel("Lineage run");
   await expect(picker).toBeVisible();
   await expect(picker.locator("option")).toHaveCount(2);
+});
+
+
+test("lineage draws relationships instead of a grid of identical cards", async ({ page }) => {
+  // The page used to render every catalogued asset as an equal-sized card
+  // and print "N relationships" without drawing one of them.
+  await installApiFixtures(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/lineage");
+  await expect(page.getByRole("heading", { name: "Lineage", exact: true })).toBeVisible();
+
+  // One drawn path per relationship.
+  await expect(page.locator("path.lineage-edge")).toHaveCount(3);
+
+  // The endpoint the catalog does not contain is shown, not dropped.
+  await expect(page.locator(".lineage-g-node.is-unresolved")).toHaveCount(1);
+
+  // Assets with no relationships are chips, not graph nodes.
+  await expect(page.locator(".asset-chip").first()).toBeVisible();
+
+  // The graph is an image, so it carries a text alternative.
+  await expect(page.getByRole("img", { name: /relationship register/i })).toBeVisible();
 });
