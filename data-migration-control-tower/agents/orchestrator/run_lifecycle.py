@@ -211,14 +211,28 @@ def delete_run(run_id: str) -> None:
     can silently become what a judge sees front and center. Tests that
     call create_run() must clean up in teardown.
 
-    Only deletes the run document itself; subcollections (catalog,
-    risk_findings, ...) are orphaned but harmless — nothing queries them
+    Deletes the subcollections too, which it used to leave behind.
+
+    The old behaviour deleted only the run document, on the reasoning
+    that the leftovers were "orphaned but harmless — nothing queries them
     without a live parent reference, and test runs never populate them
-    anyway (they're created directly via create_run(), not a real
-    Discovery pass).
+    anyway". Both halves were wrong, and a survey of the live project
+    measured how wrong: 9,891 orphaned documents under 1,028 dead
+    parents, 554 of which had the real run_YYYYMMDD_... shape rather than
+    a test id.
+
+    Not harmless, because of how this project has to query. A
+    collection-group query combined with `order_by("created_at")` needs a
+    composite index that does not exist here (see CLAUDE.md), so every
+    console aggregate streams the WHOLE group and filters in Python. The
+    console paid to read every orphan on every uncached request and then
+    threw it away — `catalog` was 6,428 dead documents out of 9,090.
+
+    `recursive_delete` walks the subcollections; the extra round trips
+    are worth not leaving a permanent tax on every later read.
     """
     client = get_client()
-    client.collection(RUN_COLLECTION).document(run_id).delete()
+    client.recursive_delete(client.collection(RUN_COLLECTION).document(run_id))
 
 
 def get_run(run_id: str) -> dict:

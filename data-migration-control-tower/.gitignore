@@ -37,3 +37,8 @@ playwright-report/
 
 # Local build proofs from tools/brand_assets.py --check
 build/
+
+# Rescue exports written by tools/purge_orphans.py. They contain real
+# estate metadata (table and column names) and are local safety copies,
+# not artefacts to publish.
+var/
