@@ -298,3 +298,98 @@ def test_the_module_docstring_tells_an_operator_how_to_turn_it_on():
     assert "Billing export" in doc
     assert "CLOUD_BILLING_EXPORT_TABLE" in doc
     assert "backfill" in doc
+
+
+# ---------------------------------------------------------------------------
+# Finding the export table
+# ---------------------------------------------------------------------------
+
+
+class _FakeTable:
+    def __init__(self, table_id: str):
+        self.table_id = table_id
+
+
+def _bq_listing(tables: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    import tools.bigquery_tools as bq
+
+    monkeypatch.setattr(
+        bq,
+        "get_client",
+        lambda: type("C", (), {"list_tables": lambda _s, _d: [_FakeTable(t) for t in tables]})(),
+    )
+
+
+def test_the_export_table_is_found_without_transcribing_the_account_id(monkeypatch):
+    """The suffix is the billing account id, which nobody has memorised.
+
+    The id here is deliberately fake. The first draft of this file used
+    the real one, copied from the project while checking the dataset
+    region — a billing account id is not a credential, but it identifies
+    a real account and has no business being committed as filler when
+    any string would do.
+    """
+    _bq_listing(["gcp_billing_export_v1_0X0X0X_1Y1Y1Y_2Z2Z2Z"], monkeypatch)
+    assert (
+        billing_export.discover_table("proj.billing_export")
+        == "proj.billing_export.gcp_billing_export_v1_0X0X0X_1Y1Y1Y_2Z2Z2Z"
+    )
+
+
+def test_a_missing_table_is_reported_as_a_wait_not_a_fault(monkeypatch):
+    """The common experience, and the one worth getting right.
+
+    The export creates its table only when the first daily batch lands —
+    hours later, with no backfill. Someone who enabled it five minutes
+    ago and finds an empty dataset will otherwise conclude the setup
+    failed and start changing things that were correct.
+    """
+    _bq_listing([], monkeypatch)
+    with pytest.raises(LookupError) as excinfo:
+        billing_export.discover_table("proj.billing_export")
+    message = str(excinfo.value)
+    assert "backfill" in message
+    assert "wait, not a fault" in message
+
+
+def test_several_export_tables_are_refused_rather_than_guessed(monkeypatch):
+    """A project can carry detailed and pricing exports alongside standard.
+
+    Picking the first would silently report a different set of numbers
+    than the operator believes they are looking at.
+    """
+    _bq_listing(
+        [
+            "gcp_billing_export_v1_0X0X0X_1Y1Y1Y_2Z2Z2Z",
+            "gcp_billing_export_v1_999999_AAAAAA_BBBBBB",
+        ],
+        monkeypatch,
+    )
+    with pytest.raises(LookupError, match="Several export tables"):
+        billing_export.discover_table("proj.billing_export")
+
+
+def test_unrelated_tables_in_the_dataset_are_ignored(monkeypatch):
+    _bq_listing(
+        ["scratch", "gcp_billing_export_v1_0X0X0X_1Y1Y1Y_2Z2Z2Z", "notes"], monkeypatch
+    )
+    assert billing_export.discover_table("p.d").endswith("0X0X0X_1Y1Y1Y_2Z2Z2Z")
+
+
+def test_a_discovered_table_still_has_to_pass_validation(monkeypatch):
+    """Discovery is convenience; it is not a reason to skip the check."""
+    _bq_listing(["gcp_billing_export_v1_0X0X0X_1Y1Y1Y_2Z2Z2Z"], monkeypatch)
+    found = billing_export.discover_table("proj.billing_export")
+    assert billing_export.validate_table(found) == found
+
+
+def test_neither_variable_set_names_both_ways_to_configure_it(capsys):
+    import os
+
+    for key in ("CLOUD_BILLING_EXPORT_TABLE", "CLOUD_BILLING_EXPORT_DATASET"):
+        os.environ.pop(key, None)
+    assert billing_export.main([]) == 1
+    err = capsys.readouterr().err
+    assert "CLOUD_BILLING_EXPORT_DATASET" in err
+    # And the region trap, which is the thing that actually blocks people.
+    assert "multi-region" in err

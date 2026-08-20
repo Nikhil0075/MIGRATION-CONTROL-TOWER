@@ -26,8 +26,13 @@ billing-account setting and not a project one:
 
   1. Billing -> Billing export -> BigQuery export -> Standard usage cost.
   2. Choose (or create) a dataset in this project and enable it.
-  3. Set CLOUD_BILLING_EXPORT_TABLE to the table it creates, in the form
+  3. Set CLOUD_BILLING_EXPORT_DATASET to `project.dataset` and let this
+     find the table, or set CLOUD_BILLING_EXPORT_TABLE to the full
      `project.dataset.gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX`.
+
+The dataset must be a US or EU MULTI-REGION. A single-region dataset is
+refused by the export dialog with "Invalid dataset region", which reads
+like a permissions problem and is not one.
 
 The export only accrues from the moment it is enabled; there is no
 backfill, so the first days after switching it on genuinely have no data
@@ -53,6 +58,11 @@ _TABLE_RE = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$")
 SNAPSHOT_COLLECTION = "cost_snapshots"
 SNAPSHOT_DOCUMENT = "current"
 
+#: What Cloud Billing names its standard-usage export table. The suffix is
+#: the billing account id with the hyphens replaced, which nobody should
+#: have to transcribe by hand from a console page.
+EXPORT_TABLE_PREFIX = "gcp_billing_export_v1_"
+
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
@@ -64,6 +74,43 @@ def validate_table(table: str) -> str:
             f"CLOUD_BILLING_EXPORT_TABLE must be project.dataset.table, got {table!r}"
         )
     return table
+
+
+def discover_table(dataset: str) -> str:
+    """Finds the export table in `dataset`, so nobody has to transcribe it.
+
+    The table is named `gcp_billing_export_v1_<billing account id>`, and
+    the account id is not something an operator has memorised. Worse, the
+    table does not exist until the first daily batch lands — hours after
+    the export is enabled, with no backfill — so the common experience is
+    looking for a table that is not there yet and assuming the setup
+    failed. This says which of those it is.
+
+    Refuses to guess when there are several: a project can carry a
+    detailed export and a pricing export alongside the standard one, and
+    silently picking the first would report the wrong numbers.
+    """
+    from tools.bigquery_tools import get_client as bq_client
+
+    client = bq_client()
+    tables = [
+        t.table_id
+        for t in client.list_tables(dataset)
+        if t.table_id.startswith(EXPORT_TABLE_PREFIX)
+    ]
+    if not tables:
+        raise LookupError(
+            f"No {EXPORT_TABLE_PREFIX}* table in {dataset} yet. Cloud Billing "
+            f"creates it when the first daily batch lands, which can take a day "
+            f"after enabling the export, and there is no backfill. If the export "
+            f"shows Enabled in the console, this is a wait, not a fault."
+        )
+    if len(tables) > 1:
+        raise LookupError(
+            f"Several export tables in {dataset}: {sorted(tables)}. Set "
+            f"CLOUD_BILLING_EXPORT_TABLE explicitly to the one you want."
+        )
+    return f"{dataset}.{tables[0]}"
 
 
 def build_query(table: str, days: int) -> str:
@@ -139,14 +186,31 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=7, help="Window to summarise. Default 7.")
     parser.add_argument("--table", help="Overrides CLOUD_BILLING_EXPORT_TABLE.")
+    parser.add_argument(
+        "--dataset",
+        help=(
+            "project.dataset holding the export; the table is found in it. "
+            "Defaults to CLOUD_BILLING_EXPORT_DATASET."
+        ),
+    )
     args = parser.parse_args(argv)
 
     table = args.table or os.environ.get("CLOUD_BILLING_EXPORT_TABLE")
+    dataset = args.dataset or os.environ.get("CLOUD_BILLING_EXPORT_DATASET")
+    if not table and dataset:
+        try:
+            table = discover_table(dataset)
+        except LookupError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(f"found export table: {table}")
     if not table:
         print(
-            "CLOUD_BILLING_EXPORT_TABLE is not set. Enable Cloud Billing export to "
-            "BigQuery (Billing -> Billing export -> BigQuery export), then set it to "
-            "the project.dataset.table it creates. See this module's docstring.",
+            "Neither CLOUD_BILLING_EXPORT_TABLE nor CLOUD_BILLING_EXPORT_DATASET is "
+            "set. Enable Cloud Billing export to BigQuery (Billing -> Billing export "
+            "-> BigQuery export -> Standard usage cost) against a US or EU "
+            "multi-region dataset, then set CLOUD_BILLING_EXPORT_DATASET to it and "
+            "this will find the table itself. See this module's docstring.",
             file=sys.stderr,
         )
         return 1
