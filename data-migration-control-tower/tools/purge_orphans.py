@@ -33,7 +33,7 @@ import json
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from agents.orchestrator.run_lifecycle import RUN_COLLECTION
 from tools.firestore_client import get_client
@@ -103,27 +103,37 @@ def _encode(value: Any) -> Any:
     return str(value)
 
 
-def export(refs: Iterable[Any], destination: Path) -> int:
+#: Documents fetched per `get_all` round trip.
+READ_CHUNK = 300
+
+
+def export(client, refs, destination: Path) -> int:
     """Writes every document to JSONL and returns how many were written.
 
     Reads the documents a second time, in full — the discovery pass
-    fetched keys only. That is the cost of being able to undo this.
+    fetched keys only. That is the price of being able to undo this.
+
+    Fetched in bulk rather than one `ref.get()` at a time. These reads
+    are latency-bound, not throughput-bound: against an off-region
+    project one round trip costs a good fraction of a second, so 10,053
+    sequential reads is most of an hour. The first real run of this tool
+    was measured at roughly 240 documents a minute, which is what
+    prompted the change.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
+    refs = list(refs)
     written = 0
     with destination.open("w", encoding="utf-8") as handle:
-        for ref in refs:
-            snapshot = ref.get()
-            if not snapshot.exists:
-                continue
-            handle.write(
-                json.dumps(
-                    {"path": ref.path, "data": snapshot.to_dict()},
-                    default=_encode,
-                )
-                + "\n"
-            )
-            written += 1
+        for start in range(0, len(refs), READ_CHUNK):
+            for snapshot in client.get_all(refs[start : start + READ_CHUNK]):
+                # get_all returns missing documents too, and in no
+                # guaranteed order — take the path from the snapshot
+                # rather than pairing it back up with the request.
+                if not snapshot.exists:
+                    continue
+                record = {"path": snapshot.reference.path, "data": snapshot.to_dict()}
+                print(json.dumps(record, default=_encode), file=handle)
+                written += 1
     return written
 
 
@@ -177,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     destination = EXPORT_DIR / f"orphans-{stamp}.jsonl"
     print(f"\nexporting {len(refs)} documents to {destination} …")
     try:
-        written = export(refs, destination)
+        written = export(client, refs, destination)
     except OSError as exc:
         # Refuse rather than delete without a rescue copy. An
         # irreversible delete whose backup silently failed is the one

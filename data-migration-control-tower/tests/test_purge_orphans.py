@@ -29,7 +29,9 @@ class FakeRef:
         self._data = data if data is not None else {"field": "value"}
 
     def get(self):
-        return types.SimpleNamespace(exists=True, to_dict=lambda: dict(self._data))
+        return types.SimpleNamespace(
+            exists=True, reference=self, to_dict=lambda: dict(self._data)
+        )
 
 
 class FakeCollection:
@@ -72,6 +74,13 @@ class FakeClient:
             select=lambda _fields: types.SimpleNamespace(stream=lambda: iter(docs)),
             stream=lambda: iter(docs),
         )
+
+    def get_all(self, references):
+        # Firestore returns missing documents too, and in no guaranteed
+        # order. Reversing the chunk here is not gratuitous: it is the
+        # cheapest way to prove the export takes each path from the
+        # SNAPSHOT rather than pairing results back up positionally.
+        return [ref.get() for ref in reversed(list(references))]
 
     def batch(self):
         client = self
@@ -125,11 +134,14 @@ def test_a_subcollection_nested_under_something_other_than_a_run_is_left_alone()
 def test_every_document_is_exported_before_it_is_deleted(tmp_path):
     docs = [_doc_in("dead", "catalog", i) for i in range(3)]
     destination = tmp_path / "export.jsonl"
-    written = purge_orphans.export([doc.reference for doc in docs], destination)
+    client = FakeClient({})
+    written = purge_orphans.export(client, [doc.reference for doc in docs], destination)
 
     assert written == 3
     lines = [json.loads(line) for line in destination.read_text(encoding="utf-8").splitlines()]
-    assert [line["path"] for line in lines] == [doc.reference.path for doc in docs]
+    assert sorted(line["path"] for line in lines) == sorted(
+        doc.reference.path for doc in docs
+    )
     # The DATA, not just the path — a rescue copy that cannot restore the
     # contents is not a rescue copy.
     assert all(line["data"] == {"field": "value"} for line in lines)
@@ -139,7 +151,7 @@ def test_the_export_survives_firestore_types_that_are_not_json(tmp_path):
     import datetime as dt
 
     ref = FakeRef("migration_runs/dead/catalog/1", data={"at": dt.datetime(2026, 8, 20, 12, 0)})
-    purge_orphans.export([ref], tmp_path / "export.jsonl")
+    purge_orphans.export(FakeClient({}), [ref], tmp_path / "export.jsonl")
     line = json.loads((tmp_path / "export.jsonl").read_text(encoding="utf-8"))
     assert line["data"]["at"].startswith("2026-08-20T12:00")
 
@@ -236,3 +248,26 @@ def test_deleting_a_run_removes_its_subcollections_too(monkeypatch):
 
     assert recursive == ["migration_runs/run-1"]
     assert plain == [], "the run document was deleted on its own, orphaning its subcollections"
+
+
+def test_documents_are_fetched_in_bulk_not_one_at_a_time(tmp_path):
+    """The first real run made this a measured problem, not a style point.
+
+    `export` fetched each document with its own `ref.get()`. Those reads
+    are latency-bound, so against an off-region project 10,053 documents
+    ran at roughly 240 a minute — most of an hour before a single delete.
+    """
+    calls: list[int] = []
+
+    class CountingClient(FakeClient):
+        def get_all(self, references):
+            references = list(references)
+            calls.append(len(references))
+            return [ref.get() for ref in references]
+
+    refs = [FakeRef(f"migration_runs/dead/catalog/{i}") for i in range(750)]
+    written = purge_orphans.export(CountingClient({}), refs, tmp_path / "export.jsonl")
+
+    assert written == 750
+    assert len(calls) == 3, f"expected 3 bulk reads at chunk 300, got {len(calls)}"
+    assert calls == [300, 300, 150]
