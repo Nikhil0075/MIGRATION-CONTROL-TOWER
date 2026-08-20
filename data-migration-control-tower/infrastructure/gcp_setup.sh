@@ -76,6 +76,21 @@ else
   echo "    BigQuery dataset already exists, skipping."
 fi
 
+# Cloud Billing export refuses a single-region dataset outright — "Invalid
+# dataset region ... select a dataset in a multi-region option, such as US
+# or EU". The migration target lives in $REGION, which is a single region,
+# so the export needs one of its own. Empty until you enable the export
+# itself, which is a BILLING ACCOUNT setting this script cannot make:
+#   Billing -> Billing export -> BigQuery export -> Standard usage cost.
+BILLING_EXPORT_DATASET="${BILLING_EXPORT_DATASET:-billing_export}"
+BILLING_EXPORT_LOCATION="${BILLING_EXPORT_LOCATION:-US}"
+echo "==> Ensuring billing-export dataset '$BILLING_EXPORT_DATASET' ($BILLING_EXPORT_LOCATION) exists..."
+if ! bq --project_id="$PROJECT_ID" show "${PROJECT_ID}:${BILLING_EXPORT_DATASET}" >/dev/null 2>&1; then
+  bq --project_id="$PROJECT_ID" mk --dataset     --location="$BILLING_EXPORT_LOCATION"     --description="Cloud Billing export. Must be a US/EU multi-region: billing export refuses single-region datasets."     "${PROJECT_ID}:${BILLING_EXPORT_DATASET}"
+else
+  echo "    Billing-export dataset already exists, skipping."
+fi
+
 echo "==> Ensuring Pub/Sub topics exist (master doc §8.1 event topics)..."
 # risk.blocked, plan.approved, migration.completed, cutover.approved,
 # and cutover.completed were declared upfront per the doc's original
@@ -272,6 +287,7 @@ echo "    Region:         $REGION"
 echo "    Firestore:      (default) native mode"
 echo "    Firestore test: $TEST_DATABASE (pytest writes here, never (default))"
 echo "    BigQuery:       ${PROJECT_ID}:${BQ_DATASET}"
+echo "    Billing export: ${PROJECT_ID}:${BILLING_EXPORT_DATASET} ($BILLING_EXPORT_LOCATION multi-region)"
 echo "    Pub/Sub topics: ${TOPICS[*]}"
 echo "    Pub/Sub subs:   ${!SUBSCRIPTIONS[*]}"
 echo "    Dead letters:   -> '$DEAD_LETTER_TOPIC' after $MAX_DELIVERY_ATTEMPTS attempts;"

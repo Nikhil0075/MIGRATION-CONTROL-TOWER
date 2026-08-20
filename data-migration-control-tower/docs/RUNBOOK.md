@@ -359,8 +359,17 @@ invoice. Re-verify them against the source URLs and bump
 setting, so `gcp_setup.sh` cannot provision it:
 
 1. Cloud Console → Billing → Billing export → BigQuery export
-2. Enable **Standard usage cost**, pointing at a dataset in this project
+2. Enable **Standard usage cost**, pointing at the `billing_export`
+   dataset — **not** `migration_target`
 3. Set `CLOUD_BILLING_EXPORT_TABLE` to the table it creates
+
+> **"Invalid dataset region."** Billing export accepts only the `US` or
+> `EU` multi-regions and refuses a single-region dataset. This project's
+> `migration_target` is in `us-central1`, which is a single region, so
+> selecting it fails with exactly that message. `gcp_setup.sh` creates a
+> separate `billing_export` dataset in the `US` multi-region for this;
+> pick that one. The migration target stays where it is — co-locating it
+> with the source region is deliberate and unrelated.
 
 ```bash
 cd data-migration-control-tower && python -m tools.billing_export
