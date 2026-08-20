@@ -330,6 +330,61 @@ Get-NetTCPConnection -LocalPort 8080 -State Listen | ForEach-Object { Stop-Proce
 
 ---
 
+## Cost and volume evidence
+
+Four measurements on the Overview page, each of which says plainly when
+it has nothing to report. Three are automatic; one needs a setting only
+you can make.
+
+**Estimated bytes** — automatic. Adapters read the size out of the source
+engine's own catalog during discovery (`sys.allocation_units` on SQL
+Server, `pg_total_relation_size` on Postgres). It appears after the next
+discovery run; sources catalogued before this existed carry no size and
+the panel says how many tables that leaves unmeasured.
+
+**Estimated cost** — automatic. Model token counts come from the model's
+own `usage_metadata`, BigQuery bytes from the job's own
+`total_bytes_billed`, both recorded against the run that caused them.
+They are priced from `contracts/price_book.json`, which carries an
+effective date and source URLs. It appears once a run has done model or
+BigQuery work.
+
+The rates are **published list prices**. They ignore committed-use
+discounts, free tiers and anything negotiated on your billing account, so
+the figure is an upper bound on list rather than a prediction of the
+invoice. Re-verify them against the source URLs and bump
+`effective_date`; the console shows that date so a stale card is visible.
+
+**Actual cost** — needs you. Cloud Billing export is a billing-account
+setting, so `gcp_setup.sh` cannot provision it:
+
+1. Cloud Console → Billing → Billing export → BigQuery export
+2. Enable **Standard usage cost**, pointing at a dataset in this project
+3. Set `CLOUD_BILLING_EXPORT_TABLE` to the table it creates
+
+```bash
+cd data-migration-control-tower && python -m tools.billing_export
+```
+
+Snapshotted rather than queried live: the export is a BigQuery table, and
+querying it on every dashboard load would make the cost panel a recurring
+cost of its own. Re-run it on a schedule; the console marks a snapshot
+older than 36 hours as stale rather than presenting it as current.
+
+The export has **no backfill** — it accrues from the moment you enable
+it, so the first day genuinely has no data and the tool says so instead
+of writing a confident 0.00.
+
+**Scale metrics** — a command:
+
+```bash
+cd data-migration-control-tower && python evaluation/scale_harness.py
+```
+
+Generates synthetic pipeline definitions and pushes them through three
+real control-plane operations, timing each. Control-plane scale, not
+bulk-data scale — say so in any write-up that cites the numbers.
+
 ## Where the tests write
 
 `pytest` writes to a **separate Firestore database**, never to the one the

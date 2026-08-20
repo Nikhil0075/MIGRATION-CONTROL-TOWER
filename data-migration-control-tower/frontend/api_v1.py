@@ -1018,6 +1018,114 @@ def overview(
     return _cached(f"overview:{estate_id}", lambda: _build_overview(estate_id))
 
 
+def _estimated_cost(usage_events: list[dict]) -> dict:
+    """Measured usage, priced from the committed rate card.
+
+    Two halves that must not be confused. Usage is measured — token
+    counts as the model reported them, bytes as BigQuery billed them.
+    Price is declared, in contracts/price_book.json, with an effective
+    date and a source. The response carries both, so the figure can be
+    recomputed or the rates rejected.
+
+    This is an estimate against published list prices. It ignores
+    committed-use discounts, free tiers and anything negotiated on the
+    billing account, which is precisely why Actual cost is a separate
+    measurement from the billing export rather than a refinement of this
+    one.
+    """
+    from tools.usage_meter import price_usage
+
+    if not usage_events:
+        return Availability(
+            status="not_configured",
+            reason=(
+                "No model or BigQuery usage has been recorded for these runs. "
+                "Usage is recorded from the run that causes it, so a fleet with "
+                "no completed work has none."
+            ),
+        ).model_dump()
+
+    priced = price_usage(usage_events)
+    caveat = (
+        f" {len(priced['unpriced'])} item(s) could not be priced from this card."
+        if priced["unpriced"]
+        else ""
+    )
+    return Availability(
+        status="available",
+        reason=(
+            f"{priced['usage']['model_calls']} model call(s) and "
+            f"{priced['usage']['bigquery_jobs']} BigQuery job(s), priced at "
+            f"{priced['basis']} ({priced['region']}) from price book "
+            f"{priced['price_book_effective_date']}.{caveat}"
+        ),
+        last_observed_at=max(
+            (str(event.get("at")) for event in usage_events if event.get("at")), default=None
+        ),
+        value=priced,
+    ).model_dump()
+
+
+def _actual_cost() -> dict:
+    """The billing export's own figure, as last snapshotted.
+
+    Read from a durable snapshot rather than queried here. The billing
+    export is a BigQuery table, and querying it on every dashboard load
+    would make the cost panel a recurring cost of its own — which is a
+    silly way for a cost dashboard to behave. tools/billing_export.py
+    writes the snapshot; this reads it.
+    """
+    table = os.environ.get("CLOUD_BILLING_EXPORT_TABLE")
+    if not table:
+        return Availability(
+            status="not_configured",
+            reason=(
+                "CLOUD_BILLING_EXPORT_TABLE is not configured. Enable Cloud "
+                "Billing export to BigQuery, then set it to the "
+                "project.dataset.table it writes to."
+            ),
+        ).model_dump()
+
+    snapshot = get_client().collection("cost_snapshots").document("current").get()
+    record = snapshot.to_dict() if snapshot.exists else None
+    if not record:
+        return Availability(
+            status="not_configured",
+            reason=(
+                f"Billing export is configured ({table}) but no snapshot has been "
+                f"taken. Run `python -m tools.billing_export`."
+            ),
+        ).model_dump()
+
+    return Availability(
+        status="stale" if _is_stale(record.get("observed_at")) else "available",
+        reason=(
+            f"{record.get('days')} day(s) of billed usage to "
+            f"{record.get('period_end')}, from {record.get('source_table')}."
+        ),
+        last_observed_at=record.get("observed_at"),
+        value=record,
+    ).model_dump()
+
+
+def _is_stale(observed_at: str | None, max_age_hours: int = 36) -> bool:
+    """A cost snapshot older than this is reported as stale, not as current.
+
+    The billing export itself lags by hours, so a snapshot is never
+    live — but one taken last week presented as today's spend is a
+    different kind of wrong.
+    """
+    if not observed_at:
+        return True
+    try:
+        taken = dt.datetime.fromisoformat(str(observed_at))
+    except ValueError:
+        return True
+    if taken.tzinfo is None:
+        taken = taken.replace(tzinfo=dt.timezone.utc)
+    return (dt.datetime.now(dt.timezone.utc) - taken).total_seconds() > max_age_hours * 3600
+
+
 def _estimated_bytes(catalog: list[dict]) -> dict:
     """How many bytes the discovered estate occupies at the source.
 
@@ -1128,17 +1236,31 @@ def _build_overview(estate_id: str | None) -> dict:
     def _latest_sub(name):
         return lambda: _collection_docs(latest_run_id, name) if latest_run_id else []
 
+    # Same context-copy rule as `_gather`: a pool thread starts with an
+    # empty context, so a read that consults `_READ_SCOPE` inside one of
+    # these lambdas would see it unset. The run set here is already
+    # scoped before the pool, so nothing is leaking today — this keeps it
+    # that way for whatever gets added to the dict next.
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {
-            "operations": pool.submit(_operations),
-            "connections": pool.submit(_connection_snapshots),
-            "decisions": pool.submit(_decisions),
-            "findings": pool.submit(_latest_sub("risk_findings")),
-            "executions": pool.submit(_latest_sub("migration_executions")),
-            "incidents": pool.submit(_latest_sub("incidents")),
-            "approvals": pool.submit(_latest_sub("approval_history")),
-            "catalog": pool.submit(_latest_sub("catalog")),
-            "wave_state": pool.submit(lambda: _wave_state(estate_id)),
+            "operations": pool.submit(copy_context().run, _operations),
+            "connections": pool.submit(copy_context().run, _connection_snapshots),
+            "decisions": pool.submit(copy_context().run, _decisions),
+            "findings": pool.submit(copy_context().run, _latest_sub("risk_findings")),
+            "executions": pool.submit(copy_context().run, _latest_sub("migration_executions")),
+            "incidents": pool.submit(copy_context().run, _latest_sub("incidents")),
+            "approvals": pool.submit(copy_context().run, _latest_sub("approval_history")),
+            "catalog": pool.submit(copy_context().run, _latest_sub("catalog")),
+            "usage": pool.submit(copy_context().run, 
+                lambda: [
+                    item
+                    for items in _subcollection_group(
+                        "usage_events", {r["run_id"] for r in runs}
+                    ).values()
+                    for item in items
+                ]
+            ),
+            "wave_state": pool.submit(copy_context().run, lambda: _wave_state(estate_id)),
         }
         resolved = {name: future.result() for name, future in futures.items()}
 
@@ -1151,6 +1273,7 @@ def _build_overview(estate_id: str | None) -> dict:
     approvals = resolved["approvals"]
     wave_state = resolved["wave_state"]
     estimated_bytes = _estimated_bytes(resolved["catalog"])
+    estimated_cost = _estimated_cost(resolved["usage"])
     latest_execution = executions[-1] if executions else None
     progress = None
     if latest_execution and latest_execution.get("source_count"):
@@ -1185,15 +1308,8 @@ def _build_overview(estate_id: str | None) -> dict:
             "recovery_rate": round(len(recovered) / len(failed_runs), 3) if failed_runs else None,
             "human_interventions": sum(1 for item in approvals if item.get("event") == "APPROVED"),
             "incidents": {"total": len(incidents), "open": sum(1 for item in incidents if item.get("outcome") == "PENDING")},
-            "estimated_cost": Availability(status="not_configured", reason="Token and priced job usage are not yet recorded.").model_dump(),
-            "actual_cost": Availability(
-                status="stale" if os.environ.get("CLOUD_BILLING_EXPORT_TABLE") else "not_configured",
-                reason=(
-                    "Billing export is configured but no durable cost snapshot has been observed."
-                    if os.environ.get("CLOUD_BILLING_EXPORT_TABLE")
-                    else "CLOUD_BILLING_EXPORT_TABLE is not configured."
-                ),
-            ).model_dump(),
+            "estimated_cost": estimated_cost,
+            "actual_cost": _actual_cost(),
             "estimated_bytes": estimated_bytes,
         }
     )

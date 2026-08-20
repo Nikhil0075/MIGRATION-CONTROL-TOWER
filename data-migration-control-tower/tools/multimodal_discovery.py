@@ -26,6 +26,8 @@ applies, not a second, inconsistent judgment.
 from __future__ import annotations
 
 import json
+
+from tools.usage_meter import extract_model_usage, record_model_usage
 import logging
 from pathlib import Path
 
@@ -68,7 +70,7 @@ _VISION_PROMPT = (
 )
 
 
-def _try_gemini_extraction(parts_builder) -> dict | None:
+def _try_gemini_extraction(parts_builder, run_id: str | None = None) -> dict | None:
     try:
         import os
 
@@ -79,6 +81,18 @@ def _try_gemini_extraction(parts_builder) -> dict | None:
         model = GenerativeModel(os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"))
         content = parts_builder()
         response = model.generate_content([content, _VISION_PROMPT])
+        # Recorded before the response is parsed. The tokens were spent
+        # whether or not the JSON turns out to be valid, and a cost that
+        # only counts successful calls understates the real one.
+        usage = extract_model_usage(response)
+        if usage:
+            record_model_usage(
+                run_id,
+                model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
+                input_tokens=usage[0],
+                output_tokens=usage[1],
+                purpose="discovery.documentation",
+            )
         text = (response.text or "").strip()
         # Untrusted-content discipline (§23.1): model output is
         # schema-validated before use; a parse failure is a step
@@ -92,10 +106,10 @@ def _try_gemini_extraction(parts_builder) -> dict | None:
         return None
 
 
-def extract_documented_schema_from_image(image_path: str | Path) -> dict:
+def extract_documented_schema_from_image(image_path: str | Path, run_id: str | None = None) -> dict:
     """Returns {table, columns, extraction_method, source_artifact} for an ERD image."""
     image_path = Path(image_path)
-    parsed = _try_gemini_extraction(lambda: _image_part(image_path))
+    parsed = _try_gemini_extraction(lambda: _image_part(image_path), run_id=run_id)
     if parsed is not None:
         return {**parsed, "extraction_method": "gemini_vision", "source_artifact": image_path.name}
 
@@ -105,10 +119,10 @@ def extract_documented_schema_from_image(image_path: str | Path) -> dict:
     return {**fallback, "extraction_method": "deterministic_fallback", "source_artifact": image_path.name}
 
 
-def extract_documented_schema_from_pdf(pdf_path: str | Path) -> dict:
+def extract_documented_schema_from_pdf(pdf_path: str | Path, run_id: str | None = None) -> dict:
     """Returns {table, columns, extraction_method, source_artifact} for a PDF data dictionary."""
     pdf_path = Path(pdf_path)
-    parsed = _try_gemini_extraction(lambda: _pdf_part(pdf_path))
+    parsed = _try_gemini_extraction(lambda: _pdf_part(pdf_path), run_id=run_id)
     if parsed is not None:
         return {**parsed, "extraction_method": "gemini_vision", "source_artifact": pdf_path.name}
 

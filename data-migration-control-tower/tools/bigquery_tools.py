@@ -65,7 +65,44 @@ def load_json_rows(
         job_config.autodetect = True
     job = client.load_table_from_json(rows, table_ref, job_config=job_config)
     job.result()  # wait for completion, raises on failure
+    # Batch loads are not charged for the load itself. Recorded anyway,
+    # at a zero rate declared in the price book: a reader can then tell a
+    # free operation from one nobody thought to measure.
+    from tools.usage_meter import current_run_id, record_bigquery_usage
+
+    record_bigquery_usage(
+        current_run_id(),
+        job_kind="load",
+        bytes_billed=getattr(job, "output_bytes", None) or 0,
+        purpose="data_plane.load",
+    )
     return len(rows)
+
+
+def _metered_query(query: str, *, purpose: str):
+    """Runs a query and records what BigQuery says it billed.
+
+    One helper rather than five instrumented call sites, so a query added
+    later is metered by construction instead of by remembering. The job
+    object carries the figures; nothing here estimates them.
+
+    `total_bytes_billed`, not `total_bytes_processed`: BigQuery bills a
+    10 MB minimum per query, so this project's many tiny reconciliation
+    counts cost far more than the bytes they touch. Both are recorded,
+    because the gap between them is the interesting part.
+    """
+    from tools.usage_meter import current_run_id, record_bigquery_usage
+
+    job = get_client().query(query)
+    result = job.result()  # wait, so the job carries its final statistics
+    record_bigquery_usage(
+        current_run_id(),
+        job_kind="query",
+        bytes_billed=getattr(job, "total_bytes_billed", None),
+        bytes_processed=getattr(job, "total_bytes_processed", None),
+        purpose=purpose,
+    )
+    return result
 
 
 def get_table_schema(table: str) -> list[bigquery.SchemaField]:
@@ -77,7 +114,7 @@ def get_table_schema(table: str) -> list[bigquery.SchemaField]:
 def get_row_count(table: str, *, dataset: str | None = None) -> int:
     client = get_client()
     query = f"SELECT COUNT(*) AS n FROM `{client.project}.{_dataset(dataset)}.{table}`"
-    return int(next(iter(client.query(query).result()))["n"])
+    return int(next(iter(_metered_query(query, purpose="validation.row_count")))["n"])
 
 
 def get_column_names(table: str) -> list[str]:
@@ -92,13 +129,13 @@ def get_null_count(table: str, column: str) -> int:
         f"SELECT COUNTIF(`{column}` IS NULL) AS n "
         f"FROM `{client.project}.{_dataset()}.{table}`"
     )
-    return int(next(iter(client.query(query).result()))["n"])
+    return int(next(iter(_metered_query(query, purpose="validation.null_count")))["n"])
 
 
 def get_numeric_sum(table: str, column: str) -> float:
     client = get_client()
     query = f"SELECT SUM(`{column}`) AS s FROM `{client.project}.{_dataset()}.{table}`"
-    value = next(iter(client.query(query).result()))["s"]
+    value = next(iter(_metered_query(query, purpose="validation.numeric_sum")))["s"]
     return float(value) if value is not None else 0.0
 
 
@@ -109,4 +146,4 @@ def get_key_values(table: str, column: str, *, dataset: str | None = None) -> li
         f"SELECT CAST(`{column}` AS STRING) AS k "
         f"FROM `{client.project}.{_dataset(dataset)}.{table}` ORDER BY k"
     )
-    return [row["k"] for row in client.query(query).result()]
+    return [row["k"] for row in _metered_query(query, purpose="validation.key_values")]

@@ -185,7 +185,7 @@ def assess_documentation_drift(
         (extract_documented_schema_from_image, erd_image_path),
         (extract_documented_schema_from_pdf, data_dictionary_pdf_path),
     ):
-        documented = extractor(path)
+        documented = extractor(path, run_id=run_id)
         actual_table = _find_table_by_suffix(catalog, documented["table"])
         if actual_table is None:
             logger.warning(

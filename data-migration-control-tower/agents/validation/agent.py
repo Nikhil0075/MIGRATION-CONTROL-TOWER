@@ -35,6 +35,7 @@ import datetime as dt
 import logging
 import uuid
 
+from tools.usage_meter import attributes_usage
 from tools.bigquery_tools import (
     get_column_names as bq_columns,
     get_key_values as bq_keys,
@@ -102,6 +103,7 @@ def _check_one_target(adapter, target: dict) -> list[dict]:
     return results
 
 
+@attributes_usage
 def run_reconciliation(run_id: str) -> dict:
     """Tool: runs the deterministic checks for every scheduled target.
 

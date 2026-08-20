@@ -44,6 +44,7 @@ import logging
 import uuid
 
 from tools import memory_bank
+from tools.usage_meter import extract_model_usage, record_model_usage  # noqa: E402
 from tools.firestore_client import get_client
 from tools.migration_executor import execute_migration
 
@@ -94,7 +95,12 @@ def _deterministic_narrative(failed_checks: list[dict], table_ref: str, pipeline
     )
 
 
-def _try_gemini_narrative(failed_checks: list[dict], table_ref: str, pipelines: list[str]) -> str | None:
+def _try_gemini_narrative(
+    failed_checks: list[dict],
+    table_ref: str,
+    pipelines: list[str],
+    run_id: str | None = None,
+) -> str | None:
     """Best-effort Gemini call for a natural-language explanation (§9).
 
     Returns None on any failure — model unavailability must never block
@@ -120,6 +126,19 @@ def _try_gemini_narrative(failed_checks: list[dict], table_ref: str, pipelines: 
             f"Failed check evidence: {evidence}."
         )
         response = model.generate_content(prompt)
+        # Token counts as the model itself reports them, attributed to
+        # the run that caused the call. Measured, never inferred from
+        # prompt length — a cost derived from a guess is the kind of
+        # invented evidence this project exists not to produce.
+        usage = extract_model_usage(response)
+        if usage:
+            record_model_usage(
+                run_id,
+                model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
+                input_tokens=usage[0],
+                output_tokens=usage[1],
+                purpose="recovery.narrative",
+            )
         text = (response.text or "").strip()
         return text or None
     except Exception as exc:  # noqa: BLE001 — any failure here is non-fatal
@@ -183,7 +202,7 @@ def investigate(run_id: str, table_ref: str | None = None) -> dict:
         memory_bank.mark_recalled(signature, run_id)
         _record_memory_ref(run_id, signature)
     else:
-        narrative = _try_gemini_narrative(failed_checks, table_ref, pipelines)
+        narrative = _try_gemini_narrative(failed_checks, table_ref, pipelines, run_id=run_id)
         root_cause_generated_by = "gemini" if narrative else "deterministic"
         if narrative is None:
             narrative = _deterministic_narrative(failed_checks, table_ref, pipelines)

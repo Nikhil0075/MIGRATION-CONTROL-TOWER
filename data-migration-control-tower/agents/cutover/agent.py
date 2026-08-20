@@ -19,6 +19,7 @@ import datetime as dt
 import logging
 import os
 
+from tools.usage_meter import attributes_usage
 from tools.firestore_client import get_client
 from tools.policy_engine import evaluate
 from tools.reconciliation import check_hash, check_row_count
@@ -90,6 +91,7 @@ def request_approval(run_id: str) -> dict:
     return record
 
 
+@attributes_usage
 def perform_cutover(run_id: str) -> dict:
     """Tool: consumes the human-issued approval token and performs the cutover action.
 

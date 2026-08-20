@@ -1,0 +1,57 @@
+{
+  "$comment": [
+    "Unit prices used to turn MEASURED usage into an estimated cost.",
+    "",
+    "This file is the whole reason the estimate is checkable. Usage is",
+    "measured (tokens reported by the model, bytes billed reported by",
+    "BigQuery); price is declared here, dated, and cited. The console shows",
+    "both, so a reader can recompute the figure or reject the rates.",
+    "",
+    "These are PUBLISHED LIST PRICES for the stated region. They ignore",
+    "committed-use discounts, free tiers, sustained-use discounts and any",
+    "negotiated rate on the billing account. An estimate built from them is",
+    "an upper bound on list, not a prediction of the invoice — which is",
+    "exactly why 'Actual cost', sourced from the billing export, is a",
+    "separate measurement rather than a refinement of this one.",
+    "",
+    "Re-verify against the source URLs and bump effective_date. The console",
+    "displays that date so a stale card is visible rather than silent."
+  ],
+  "version": "2026-08-20",
+  "effective_date": "2026-08-20",
+  "currency": "USD",
+  "region": "us-central1",
+  "basis": "published list price",
+  "sources": {
+    "vertex_ai": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+    "bigquery": "https://cloud.google.com/bigquery/pricing"
+  },
+  "rates": {
+    "model": {
+      "$comment": "Per 1,000,000 tokens. Keyed by model id; 'default' prices anything unlisted rather than silently costing it at zero.",
+      "unit": "per_million_tokens",
+      "models": {
+        "default": { "input": 0.30, "output": 2.50 },
+        "gemini-3.5-flash": { "input": 0.30, "output": 2.50 },
+        "gemini-2.5-flash": { "input": 0.30, "output": 2.50 },
+        "gemini-2.0-flash": { "input": 0.15, "output": 0.60 },
+        "gemini-2.5-pro": { "input": 1.25, "output": 10.00 }
+      }
+    },
+    "bigquery_query": {
+      "$comment": "On-demand analysis, per tebibyte BILLED. BigQuery bills a 10 MB minimum per query, which is why bytes_billed is recorded rather than bytes_processed.",
+      "unit": "per_tebibyte_billed",
+      "price": 6.25
+    },
+    "bigquery_storage_active": {
+      "$comment": "Active logical storage, per gibibyte-month. Not charged by this project's estimate today - no usage event records storage duration - and present so that a future one is priced from the same place.",
+      "unit": "per_gibibyte_month",
+      "price": 0.02
+    },
+    "bigquery_load": {
+      "$comment": "Batch loads into BigQuery are not charged for the load itself. Recorded explicitly as zero rather than omitted, so a reader can tell a free operation from a forgotten one.",
+      "unit": "per_tebibyte_billed",
+      "price": 0.0
+    }
+  }
+}

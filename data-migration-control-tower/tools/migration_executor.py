@@ -32,6 +32,7 @@ import math
 import uuid
 from typing import Iterator
 
+from tools.usage_meter import attributes_usage
 from tools.bigquery_tools import get_table_schema, load_json_rows
 from tools.firestore_client import get_client
 from tools.sqlserver_client import get_connection
@@ -205,6 +206,7 @@ class InMemoryExecutor(DataPlaneExecutor):
         return total
 
 
+@attributes_usage
 def execute_migration(
     run_id: str,
     source_schema: str | None = None,
