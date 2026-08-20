@@ -434,7 +434,8 @@ oj-c-drawer-layout, .mct-app > oj-c-drawer-layout { min-height: calc(100vh - 48p
    A wait is dead time; this fills it with things that are true rather
    than with invented progress. */
 .page-state-rich { flex-direction: column; gap: 16px; min-height: 300px; padding: 32px 20px; text-align: center; }
-.loading-status { display: flex; align-items: center; gap: 10px; }
+.loading-status { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.loading-bar { width: 220px; max-width: 100%; }
 
 .loading-fleet { display: flex; gap: 8px; align-items: center; justify-content: center; }
 .loading-fleet img { width: 34px; height: 34px; border-radius: 8px; opacity: .32; }

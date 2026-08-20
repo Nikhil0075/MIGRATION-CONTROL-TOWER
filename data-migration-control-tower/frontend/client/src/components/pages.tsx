@@ -230,8 +230,14 @@ export function LoadingState({
         </div>
       )}
       <div class="loading-status">
-        <ProgressBar value={-1} aria-label={message || "Loading operational data"} />
         <span>{message || "Loading operational data…"}</span>
+        {/* Bar under the message, in a width-constrained wrapper. Side by
+            side, the bar's own width pushed the text off the centre line
+            the fleet and the fact sit on, so the three elements read as
+            three different centres. */}
+        <div class="loading-bar">
+          <ProgressBar value={-1} aria-label={message || "Loading operational data"} />
+        </div>
       </div>
       {showFacts && (
         // aria-hidden on purpose. The status above is what a screen reader

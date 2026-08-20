@@ -715,6 +715,21 @@ test("the loading screen holds attention with facts, not invented progress", asy
   expect(text.length).toBeGreaterThan(20);
   expect(text).not.toMatch(/\d+\s*%/);
 
+  // The fleet, the message and the fact must share one centre line — they
+  // were three different centres, because the progress bar's own width
+  // pushed the message off to the right of the other two.
+  const centre = async (selector: string) => {
+    const box = await page.locator(selector).first().boundingBox();
+    return box ? Math.round(box.x + box.width / 2) : -1;
+  };
+  const [fleetC, statusC, factC] = await Promise.all([
+    centre(".loading-fleet"),
+    centre(".loading-status span"),
+    centre(".loading-fact"),
+  ]);
+  expect(Math.abs(fleetC - statusC)).toBeLessThanOrEqual(2);
+  expect(Math.abs(fleetC - factC)).toBeLessThanOrEqual(2);
+
   await page.screenshot({ path: "test-results/loading-state.png" });
 });
 
