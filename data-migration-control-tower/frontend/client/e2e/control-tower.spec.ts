@@ -313,6 +313,12 @@ for (const width of [1440, 1024, 768, 390]) {
 }
 
 test("keyboard navigation and WCAG audit", async ({ page }) => {
+  // Running axe over a whole page is CPU-bound and takes 21-24s on its
+  // own here. With four workers competing for the same cores it went
+  // past the 30s default about one run in three — a budget problem
+  // reported as a flaky accessibility audit, which is the kind of
+  // failure people learn to re-run instead of read.
+  test.slow();
   await installApiFixtures(page);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/overview");
@@ -594,10 +600,30 @@ test("the agent fleet renders one identified card per agent", async ({ page }) =
 
   // Every icon must have decoded — a wrong path returns index.html with a
   // 200, so a broken icon leaves no trace in the network log.
-  const undecoded = await page.locator(".agent-grid img.agent-badge-art").evaluateAll(
-    (images) => images.filter((img: HTMLImageElement) => !img.complete || img.naturalWidth === 0).length,
+  //
+  // Waited for rather than sampled. `img.complete` is false while a
+  // perfectly good image is still loading, so the original single check
+  // conflated "broken" with "not finished yet" and failed under parallel
+  // workers roughly one run in four. Polling separates them: a loading
+  // image becomes complete, a broken one never does and is caught by the
+  // timeout; `naturalWidth === 0` after completion is the real defect.
+  const badges = page.locator(".agent-grid img.agent-badge-art");
+  await expect
+    .poll(
+      async () =>
+        badges.evaluateAll((images) =>
+          images.filter((img: HTMLImageElement) => !img.complete).length,
+        ),
+      { timeout: 10_000, message: "agent icons never finished loading" },
+    )
+    .toBe(0);
+
+  const broken = await badges.evaluateAll((images) =>
+    images
+      .filter((img: HTMLImageElement) => img.naturalWidth === 0)
+      .map((img: HTMLImageElement) => img.src),
   );
-  expect(undecoded).toBe(0);
+  expect(broken, `these icons resolved to something that is not an image: ${broken}`).toEqual([]);
 });
 
 
@@ -697,8 +723,10 @@ test("the loading screen holds attention with facts, not invented progress", asy
     "/api/v1/incidents": {
       // Held open so the loading state is observable at all; it is
       // otherwise too brief to inspect, which is why it had never been
-      // designed.
-      delayMs: 4000,
+      // designed. Generous, because 4s was not: under four parallel
+      // workers the response sometimes landed mid-test and the loading
+      // state vanished out from under the assertions.
+      delayMs: 20_000,
       body: { incidents: [], policy_denials: [], open_count: 0 },
     },
   });

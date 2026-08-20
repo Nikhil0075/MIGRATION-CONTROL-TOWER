@@ -81,25 +81,34 @@ export function StatusPill({ value }: { value: unknown }) {
 export function useResource<T = any>(path: string, refreshKey = 0) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Kept alongside the message because "you are not allowed to see this"
+  // and "this failed" call for different screens, and the message alone
+  // cannot be told apart from a server error without parsing English.
+  const [status, setStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError(null);
+    setStatus(null);
     api<T>(path)
       .then((result) => {
         if (!active) return;
         setData(result.data);
         setGeneratedAt(result.meta.generated_at);
       })
-      .catch((reason) => active && setError(reason.message || String(reason)))
+      .catch((reason) => {
+        if (!active) return;
+        setError(reason.message || String(reason));
+        setStatus(typeof reason.status === "number" ? reason.status : null);
+      })
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
   }, [path, refreshKey]);
-  return { data, error, loading, generatedAt };
+  return { data, error, loading, generatedAt, status };
 }
 
 /** Illustrations for the states that mean "nothing here". */
@@ -254,19 +263,37 @@ export function LoadingState({
 export function PageState({
   loading,
   error,
+  status = null,
 }: {
   loading: boolean;
   error: string | null;
+  status?: number | null;
 }) {
   if (loading) return <LoadingState />;
-  if (error)
+  if (!error) return null;
+
+  // A 403 is not a failure, and telling someone their workspace is
+  // "unable to load" when the real answer is "you have not been granted
+  // this estate" sends them to look for an outage. It also used to print
+  // the backend detail verbatim, which named their own email address.
+  if (status === 403)
     return (
-      <div class="page-state page-error">
-        <strong>Unable to load this workspace.</strong>
+      <div class="page-state page-error" role="status">
+        <strong>You do not have access to this workspace.</strong>
         <span>{error}</span>
+        <span>
+          Ask an estate owner for the role named above, or switch to an estate
+          you already have.
+        </span>
       </div>
     );
-  return null;
+
+  return (
+    <div class="page-state page-error" role="status">
+      <strong>Unable to load this workspace.</strong>
+      <span>{error}</span>
+    </div>
+  );
 }
 
 export function PageHeader({
@@ -352,12 +379,23 @@ export function DataTable({
   columns,
   onRow,
   label,
+  empty,
 }: {
   rows: RecordRow[];
   columns: Column<RecordRow>[];
   onRow?: (row: RecordRow) => void;
   label: string;
+  /** What this table means when it holds nothing at all. */
+  empty?: { kind?: EmptyKind; title: string; detail?: string };
 }) {
+  // Absent and empty mean the same thing to a reader, and fourteen of
+  // this component's call sites pass a field that may simply not be on
+  // the document — `estate.sources` is missing for an estate that has
+  // not finished onboarding, and that took the whole Estates page down
+  // with "rows is not iterable" rather than showing a table with nothing
+  // in it. Normalised here because the component owns its own contract;
+  // guarding each call site would leave the fifteenth unguarded.
+  rows = Array.isArray(rows) ? rows : [];
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState(columns[0]?.key || "");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -499,12 +537,28 @@ export function DataTable({
                 ))}
               </tr>
             ))}
+            {/* "No records match the current filter" was shown for BOTH
+                of these, which meant a workspace with nothing in it yet
+                accused the reader of having filtered it away — and gave
+                them a filter to go and clear that was already empty.
+                An empty table and an over-filtered table are different
+                situations and want different sentences. */}
             {!pageRows.length && (
               <tr>
                 <td colSpan={shown.length || 1}>
-                  <div class="empty-state">
-                    No records match the current filter.
-                  </div>
+                  {rows.length === 0 ? (
+                    <EmptyState
+                      kind={empty?.kind}
+                      title={empty?.title || `No ${label.toLowerCase()} yet.`}
+                      detail={empty?.detail}
+                    />
+                  ) : (
+                    <EmptyState title="No records match the current filter.">
+                      <button type="button" onClick={() => setSearch("")}>
+                        Clear the filter
+                      </button>
+                    </EmptyState>
+                  )}
                 </td>
               </tr>
             )}
@@ -672,7 +726,7 @@ function OverviewPage({ onInspect, activeEstateId }: PageProps) {
           </button>
         }
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {data && (
         <>
           <div class="metric-grid">
@@ -826,11 +880,28 @@ function EstatesPage({ onInspect, session, navigate, activeEstateId, estateRoles
           </button>
         }
       />
-      <PageState loading={state.loading} error={state.error} />
-      {estates.length > 1 && (
+      <PageState loading={state.loading} error={state.error} status={state.status} />
+      {/* Was `estates.length > 1`, which hid the whole table from anyone
+          with exactly one estate — on the theory that a list of one is
+          not worth showing. But the table is where status, object counts,
+          authorship and last-run live; the detail panel below shows none
+          of those. Since reads became scoped to the caller's grant, a
+          single-estate viewer is the ordinary case rather than a
+          curiosity.
+
+          Rendered for zero estates too, so the table's own empty state is
+          what says so — the separate "No estates registered" panel that
+          used to do it said the same thing in a different voice, in a
+          different place on the page, and only ever appeared here. */}
+      {!state.loading && !state.error && (
         <Panel title="Registered estates" subtitle="Select one to inspect">
           <DataTable
             label="Estates"
+            empty={{
+              kind: "estate-onboarded",
+              title: "No estates are registered.",
+              detail: "Onboard one here, or seed the committed estates with python infrastructure/seed_estates.py.",
+            }}
             rows={estates}
             columns={[
               { key: "estate_id", label: "Estate" },
@@ -843,15 +914,6 @@ function EstatesPage({ onInspect, session, navigate, activeEstateId, estateRoles
             ]}
             onRow={(row: any) => setSelectedId(row.estate_id)}
           />
-        </Panel>
-      )}
-      {!state.loading && estates.length === 0 && (
-        <Panel title="No estates registered">
-          <p>
-            Nothing is registered yet. Seed the committed estates with{" "}
-            <code>python infrastructure/seed_estates.py</code>, or onboard one
-            here.
-          </p>
         </Panel>
       )}
       {estate && (
@@ -873,6 +935,10 @@ function EstatesPage({ onInspect, session, navigate, activeEstateId, estateRoles
             <DataTable
               label="Sources"
               rows={estate.sources}
+              empty={{
+                title: "No sources are registered for this estate.",
+                detail: "Add one through onboarding; a source is what discovery connects to.",
+              }}
               columns={[
                 { key: "source_id", label: "Source" },
                 { key: "adapter", label: "Adapter" },
@@ -946,12 +1012,16 @@ function AssessmentsPage(props: PageProps) {
         }
       />
       <NoEstateNotice activeEstateId={props.activeEstateId} action="starting an assessment" />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <div class="workspace-grid">
           <Panel title="Assessment history">
             <DataTable
               label="Assessments"
+              empty={{
+                title: "No assessments have run for this estate.",
+                detail: "Start one with a Migration Pack above; it catalogues the source without moving any data.",
+              }}
               rows={state.data.runs || []}
               columns={[
                 { key: "run_id", label: "Run" },
@@ -967,6 +1037,10 @@ function AssessmentsPage(props: PageProps) {
           <Panel title="Migration Packs">
             <DataTable
               label="Migration Packs"
+              empty={{
+                title: "No Migration Packs are committed.",
+                detail: "Packs live in packs/ and are validated on load.",
+              }}
               rows={state.data.packs || []}
               columns={[
                 { key: "pack_id", label: "Pack" },
@@ -1052,7 +1126,7 @@ function WavesPage(props: PageProps) {
         }
       />
       <NoEstateNotice activeEstateId={props.activeEstateId} action="applying an override" />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <>
           <div class="metric-grid">
@@ -1079,6 +1153,10 @@ function WavesPage(props: PageProps) {
             <Panel title="Active reservations">
               <DataTable
                 label="Reservations"
+                empty={{
+                  title: "Nothing is running.",
+                  detail: "Wave slots are free, so the next eligible item starts immediately.",
+                }}
                 rows={running}
                 columns={[
                   { key: "source_id", label: "Source" },
@@ -1091,6 +1169,10 @@ function WavesPage(props: PageProps) {
             <Panel title="Overrides">
               <DataTable
                 label="Overrides"
+                empty={{
+                  title: "No operator overrides are in force.",
+                  detail: "Holds and opens applied by an operator are recorded here.",
+                }}
                 rows={state.data.overrides || []}
                 columns={[
                   { key: "source_id", label: "Source" },
@@ -1109,6 +1191,9 @@ function WavesPage(props: PageProps) {
           >
             <DataTable
               label="Wave backlog"
+              empty={{
+                title: "Nothing is waiting for a slot.",
+              }}
               rows={[...(state.data.blocked || []), ...(state.data.queued || [])]}
               columns={[
                 { key: "created_at", label: "Requested" },
@@ -1216,11 +1301,16 @@ function RunsPage(props: PageProps) {
           {disabledReason}
         </div>
       )}
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <Panel title="Migration runs" subtitle="Select a row for full evidence">
           <DataTable
             label="Runs"
+            empty={{
+              kind: "no-runs",
+              title: "No migration runs for this estate.",
+              detail: "A run appears here as soon as one is started.",
+            }}
             rows={state.data}
             columns={[
               { key: "run_id", label: "Run", priority: "primary" },
@@ -1306,7 +1396,7 @@ function RunDetailPage(props: PageProps & { runId: string }) {
           </div>
         }
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {data && (
         <>
           <div class="metric-grid">
@@ -1352,6 +1442,9 @@ function RunDetailPage(props: PageProps & { runId: string }) {
           <Panel title="Stage execution evidence">
             <DataTable
               label="Stage metrics"
+              empty={{
+                title: "No stage evidence was recorded for this run.",
+              }}
               rows={data.stage_metrics || []}
               columns={[
                 { key: "stage", label: "Stage" },
@@ -1370,6 +1463,10 @@ function RunDetailPage(props: PageProps & { runId: string }) {
             <Panel title="Migration plan">
               <DataTable
                 label="Plan steps"
+                empty={{
+                  title: "This run has no migration plan yet.",
+                  detail: "The Planner writes one when the run reaches PLANNED.",
+                }}
                 rows={data.migration_plan?.[0]?.steps || []}
                 columns={[
                   { key: "step_id", label: "Step" },
@@ -1384,6 +1481,9 @@ function RunDetailPage(props: PageProps & { runId: string }) {
             <Panel title="Data-plane jobs">
               <DataTable
                 label="Data-plane jobs"
+                empty={{
+                  title: "No transfer jobs have been executed.",
+                }}
                 rows={data.migration_executions || []}
                 columns={[
                   { key: "data_plane_job_id", label: "Job" },
@@ -1428,6 +1528,10 @@ function RunDetailPage(props: PageProps & { runId: string }) {
             <Panel title="Recovery and memory">
               <DataTable
                 label="Incidents"
+                empty={{
+                  kind: "no-incidents",
+                  title: "No incidents were raised for this run.",
+                }}
                 rows={data.incidents || []}
                 columns={[
                   { key: "signature", label: "Signature" },
@@ -1441,6 +1545,10 @@ function RunDetailPage(props: PageProps & { runId: string }) {
             <Panel title="Policy evidence">
               <DataTable
                 label="Policy evidence"
+                empty={{
+                  kind: "no-policy-violations",
+                  title: "No policy decisions were recorded.",
+                }}
                 rows={data.policy_decisions || []}
                 columns={[
                   { key: "policy_id", label: "Policy" },
@@ -1463,85 +1571,6 @@ function RunDetailPage(props: PageProps & { runId: string }) {
   );
 }
 
-function LineagePage(props: PageProps) {
-  const state = useResource<RecordRow>(estatePath("/api/v1/lineage", props.activeEstateId));
-  const [filter, setFilter] = useState("ALL");
-  const edges = state.data?.edges || [];
-  const nodes = (state.data?.nodes || []).filter(
-    (node: any) =>
-      filter === "ALL" ||
-      node.classification === filter ||
-      node.type === filter.toLowerCase(),
-  );
-  return (
-    <>
-      <PageHeader
-        title="Lineage"
-        description="Asset relationships, provenance and impact evidence."
-        generatedAt={state.generatedAt}
-        actions={
-          <select
-            value={filter}
-            onChange={(event) => setFilter(event.currentTarget.value)}
-            aria-label="Filter lineage"
-          >
-            <option>ALL</option>
-            <option>PII</option>
-            <option>METADATA</option>
-            <option>PIPELINE</option>
-          </select>
-        }
-      />
-      <PageState loading={state.loading} error={state.error} />
-      {state.data && (
-        <div class="lineage-layout">
-          <Panel
-            title="Lineage graph"
-            subtitle={`${nodes.length} visible nodes · ${edges.length} relationships`}
-            className="lineage-panel"
-          >
-            <div class="lineage-canvas" role="list" aria-label="Lineage assets">
-              {nodes.map((node: any) => (
-                <button
-                  role="listitem"
-                  class={`lineage-node node-${node.type}`}
-                  onClick={() =>
-                    props.onInspect("Lineage asset", {
-                      ...node,
-                      relationships: edges.filter(
-                        (edge: any) =>
-                          edge.from === node.id || edge.to === node.id,
-                      ),
-                    })
-                  }
-                >
-                  <Icon name={node.type === "pipeline" ? "runs" : "estates"} />
-                  <strong>{node.label}</strong>
-                  <small>{node.classification || node.type}</small>
-                </button>
-              ))}
-            </div>
-          </Panel>
-          <Panel title="Relationship register">
-            <DataTable
-              label="Lineage relationships"
-              rows={edges}
-              columns={[
-                { key: "from", label: "From" },
-                { key: "to", label: "To" },
-                { key: "relationship", label: "Relationship" },
-                { key: "confidence", label: "Confidence" },
-                { key: "source", label: "Evidence source" },
-              ]}
-              onRow={(row) => props.onInspect("Lineage relationship", row)}
-            />
-          </Panel>
-        </div>
-      )}
-    </>
-  );
-}
-
 function ReconciliationPage(props: PageProps) {
   const state = useResource<any[]>(estatePath("/api/v1/reconciliation", props.activeEstateId));
   return (
@@ -1551,11 +1580,15 @@ function ReconciliationPage(props: PageProps) {
         description="Cross-run validation deltas, tolerances and immutable evidence."
         generatedAt={state.generatedAt}
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <Panel title="Validation checks">
           <DataTable
             label="Reconciliation checks"
+            empty={{
+              title: "No reconciliation has run yet.",
+              detail: "Checks appear once a run reaches validation.",
+            }}
             rows={state.data}
             columns={[
               { key: "run_id", label: "Run" },
@@ -1584,7 +1617,7 @@ function PoliciesPage(props: PageProps) {
         description="Deterministic decisions, separation of duties and approval history."
         generatedAt={state.generatedAt}
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <div class="workspace-grid">
           <Panel title="Policy decisions">
@@ -1666,7 +1699,7 @@ function AgentsPage(props: PageProps) {
         description="Registry versions, ownership, capabilities and runtime usage."
         generatedAt={state.generatedAt}
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <>
         {/* The fleet, before the registry detail. Every agent used to be an
@@ -1721,74 +1754,6 @@ function AgentsPage(props: PageProps) {
   );
 }
 
-function EvaluationsPage(props: PageProps) {
-  const state = useResource<RecordRow>(estatePath("/api/v1/evaluations", props.activeEstateId));
-  const scale = state.data?.scale_metrics;
-  return (
-    <>
-      <PageHeader
-        title="Evaluations"
-        description="Scenario evidence and bounded scale measurements."
-        generatedAt={state.generatedAt}
-      />
-      <PageState loading={state.loading} error={state.error} />
-      {state.data && (
-        <div class="workspace-grid">
-          <Panel title="Evaluation runs">
-            <DataTable
-              label="Evaluation runs"
-              rows={state.data.runs || []}
-              columns={[
-                { key: "harness_run_id", label: "Evaluation" },
-                {
-                  key: "status",
-                  label: "Status",
-                  value: (row) => (row.failed ? "FAILED" : "PASSED"),
-                  status: true,
-                },
-                { key: "started_at", label: "Started" },
-                { key: "finished_at", label: "Completed" },
-                { key: "passed", label: "Passed" },
-                { key: "failed", label: "Failed" },
-              ]}
-              onRow={(row) => props.onInspect("Evaluation evidence", row)}
-            />
-          </Panel>
-          <Panel
-            title="Scale metrics"
-            subtitle="Durable measured control-plane evidence"
-          >
-            {scale ? (
-              <div class="metric-grid">
-                <MetricCard
-                  label="Pipeline definitions"
-                  value={scale.pipeline_count}
-                />
-                <MetricCard
-                  label="Schema p95"
-                  value={`${scale.schema_validation?.p95_ms} ms`}
-                />
-                <MetricCard
-                  label="Wave total"
-                  value={`${scale.wave_scheduling?.total_duration_ms} ms`}
-                />
-                <MetricCard
-                  label="Policy p95"
-                  value={`${scale.policy_decisions?.p95_ms} ms`}
-                />
-              </div>
-            ) : (
-              <EmptyState title="Scale report not configured" detail={state.data.scale_report_reason}>
-                <StatusPill value="NOT_CONFIGURED" />
-              </EmptyState>
-            )}
-          </Panel>
-        </div>
-      )}
-    </>
-  );
-}
-
 // The panel that turns "queued, but nothing is happening" from a mystery
 // into a glance. Before the in-process consumers existed that state meant
 // "go run a script in a terminal"; now it means one of three specific,
@@ -1816,7 +1781,7 @@ function WorkersPanel(props: PageProps) {
       title="Event consumers"
       subtitle="Every console action publishes a command; these are what consume them."
     >
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {data && !data.enabled && (
         <p class="form-message" role="status">
           In-process workers are not running here: {data.reason}. Queued
@@ -1898,7 +1863,7 @@ function HealthPage(props: PageProps) {
           </button>
         }
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <>
           <div class="metric-grid">
@@ -1979,7 +1944,32 @@ export function PageRouter(props: PageProps) {
     props.route.replace(/^\/+|\/+$/g, "").split("/")[0] || "overview";
   const segments = props.route.replace(/^\/+|\/+$/g, "").split("/");
   if (root === "overview") return <OverviewPage {...props} />;
-  if (root === "estates" && segments[1] === "new")
+  if (root === "estates" && segments[1] === "new") {
+    // The button that leads here is disabled without the operator role,
+    // but the URL was not: a viewer who typed or bookmarked
+    // /estates/new got the whole wizard, filled it in, and learned at
+    // submit that they were never allowed. The server has always
+    // refused — this is about not walking someone through four steps of
+    // work to reach a 403.
+    const canOperate = (props.estateRoles || props.session.roles).includes("operator");
+    if (!canOperate)
+      return (
+        <>
+          <PageHeader
+            title="Onboard estate"
+            description="Register a new source estate and validate its connection."
+          />
+          <EmptyState
+            kind="estate-onboarded"
+            title="Onboarding an estate requires the operator role."
+            detail="You are signed in, but this action is not one your roles allow. Ask an estate owner to grant it."
+          >
+            <button type="button" onClick={() => props.navigate("estates")}>
+              Back to estates
+            </button>
+          </EmptyState>
+        </>
+      );
     return (
       <Suspense
         fallback={<LoadingState message="Preparing the onboarding wizard…" />}
@@ -1987,6 +1977,7 @@ export function PageRouter(props: PageProps) {
         <LazyEstateWizard {...props} />
       </Suspense>
     );
+  }
   if (root === "estates") return <EstatesPage {...props} />;
   if (root === "assessments") return <AssessmentsPage {...props} />;
   if (root === "waves") return <WavesPage {...props} />;

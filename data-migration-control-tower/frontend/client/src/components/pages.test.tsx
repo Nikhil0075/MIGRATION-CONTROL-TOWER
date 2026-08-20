@@ -1,12 +1,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
 import { h } from "preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api } from "../api";
+import { ApiError, api } from "../api";
 import { AGENT_IDENTITY } from "./agents";
 import { EmptyState, LOADING_FACTS, LifecycleProgress, LoadingState, PageRouter, StatusPill } from "./pages";
 import { formatValue, statusTone } from "../status";
 
-vi.mock("../api", () => ({
+vi.mock("../api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api")>()),
   api: vi.fn(() => new Promise(() => undefined)),
   idempotencyKey: vi.fn(() => "test-idempotency-key"),
 }));
@@ -160,8 +161,21 @@ describe("access levels on the sign-in screen", () => {
 // because a panel that renders an empty table for all three would leave
 // the operator exactly where they started.
 
-function mockApi(responses: Record<string, unknown>) {
+function mockApi(
+  responses: Record<string, unknown>,
+  failures: Record<string, { status: number; detail: string }> = {},
+) {
   vi.mocked(api).mockImplementation((path: string) => {
+    const failure = Object.keys(failures).find((key) => path.startsWith(key));
+    if (failure) {
+      // Rejects with the real ApiError shape, status included. The status
+      // is the whole point: "you are not allowed to see this" and "this
+      // broke" are different screens, and the message alone cannot tell
+      // them apart without parsing English.
+      return Promise.reject(
+        new ApiError(failures[failure].status, failures[failure].detail),
+      ) as any;
+    }
     const match = Object.keys(responses).find((key) => path.startsWith(key));
     if (!match) return new Promise(() => undefined) as any;
     return Promise.resolve({
@@ -553,5 +567,93 @@ describe("no estate selected", () => {
     );
     const button = (await screen.findByRole("button", { name: "Apply override" })) as HTMLButtonElement;
     await vi.waitFor(() => expect(button.disabled).toBe(false));
+  });
+});
+
+describe("what a page says when it has nothing to show", () => {
+  it("distinguishes an empty workspace from an over-filtered one", async () => {
+    // Both cases printed "No records match the current filter." — so a
+    // workspace with nothing in it yet accused the reader of having
+    // filtered it away, and offered them a filter to clear that was
+    // already empty.
+    mockApi({ "/api/v1/runs": [] });
+    render(<PageRouter {...operatorProps} route="runs" activeEstateId="sql-estate" />);
+
+    expect(await screen.findByText("No migration runs for this estate.")).toBeTruthy();
+    expect(screen.queryByText(/match the current filter/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear the filter" })).toBeNull();
+  });
+
+  it("offers a way out when a filter is what emptied the table", async () => {
+    mockApi({
+      "/api/v1/runs": [
+        { run_id: "run-1", state: "COMPLETE", mode: "execution" },
+      ],
+    });
+    render(<PageRouter {...operatorProps} route="runs" activeEstateId="sql-estate" />);
+    const search = (await screen.findByRole("textbox", {
+      name: "Filter Runs",
+    })) as HTMLInputElement;
+
+    fireEvent.input(search, { target: { value: "nothing-matches-this" } });
+
+    expect(await screen.findByText("No records match the current filter.")).toBeTruthy();
+    const clear = screen.getByRole("button", { name: "Clear the filter" });
+    clear.click();
+    await vi.waitFor(() => expect(screen.queryByText(/match the current filter/)).toBeNull());
+  });
+
+  it("shows the estate table when the caller can see exactly one estate", async () => {
+    // `estates.length > 1` hid it entirely. Since reads became scoped to
+    // the caller's grant, one estate is the ordinary case — and the table
+    // is the only place status, object counts and authorship appear.
+    mockApi({
+      "/api/v1/estates": [
+        { estate_id: "only-one", display_name: "Only One", status: "ACTIVE", objects: 12 },
+      ],
+    });
+    render(<PageRouter {...operatorProps} route="estates" activeEstateId="only-one" />);
+    expect(await screen.findByText("Registered estates")).toBeTruthy();
+  });
+});
+
+describe("access that was refused", () => {
+  it("does not tell an operator their workspace is broken when it is a permission", async () => {
+    mockApi({}, { "/api/v1/runs": { status: 403, detail: "The 'viewer' role on estate 'other' is required for this action." } });
+    render(<PageRouter {...pageProps} route="runs" activeEstateId="other" />);
+
+    expect(await screen.findByText("You do not have access to this workspace.")).toBeTruthy();
+    expect(screen.queryByText("Unable to load this workspace.")).toBeNull();
+    // And it says what to do about it.
+    expect(screen.getByText(/Ask an estate owner/)).toBeTruthy();
+  });
+
+  it("still reports a real server failure as a failure", async () => {
+    mockApi({}, { "/api/v1/runs": { status: 500, detail: "Firestore is unavailable." } });
+    render(<PageRouter {...pageProps} route="runs" activeEstateId="sql-estate" />);
+
+    expect(await screen.findByText("Unable to load this workspace.")).toBeTruthy();
+    expect(screen.queryByText(/do not have access/)).toBeNull();
+  });
+
+  it("refuses the onboarding wizard by URL, not only by disabling the button", async () => {
+    // The button was gated; the route was not. A viewer who typed
+    // /estates/new got all four steps and learned at submit that they
+    // were never allowed.
+    mockApi({ "/api/v1/estates": [] });
+    render(<PageRouter {...pageProps} route="estates/new" />);
+
+    expect(
+      await screen.findByText("Onboarding an estate requires the operator role."),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText(/display name/i)).toBeNull();
+  });
+
+  it("still opens the wizard for an operator", async () => {
+    mockApi({ "/api/v1/adapter-types": [], "/api/v1/estates": [] });
+    render(<PageRouter {...operatorProps} route="estates/new" />);
+    await vi.waitFor(() =>
+      expect(screen.queryByText("Onboarding an estate requires the operator role.")).toBeNull(),
+    );
   });
 });

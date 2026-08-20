@@ -247,13 +247,22 @@ def authorize_estate(user: UserContext, estate_id: str | None, role: str) -> Non
     the estate but never enumerates the user's other grants — knowing
     which estates exist is itself information a caller may not be entitled
     to.
+
+    It no longer names the CALLER either. The console renders the backend
+    `detail` verbatim, so this string was printing the signed-in user's
+    email address into the page — and from there into screenshots,
+    support tickets and error reporting. It told the reader nothing they
+    did not already know, since they are the one who is signed in, while
+    disclosing the session identity on any shared or projected screen.
+    What is useful is the role and the estate: that is what someone has
+    to be granted to get past this.
     """
     if not user.has_role(role, estate_id):
         raise HTTPException(
             status_code=403,
             detail=(
-                f"{user.email!r} does not hold the {role!r} role on estate "
-                f"{estate_id!r}."
+                f"The {role!r} role on estate {estate_id!r} is required for "
+                f"this action."
             ),
         )
 
@@ -263,6 +272,9 @@ def get_approver_identity(authorization: str | None = Header(default=None)) -> s
     if not user.has_role("approver"):
         raise HTTPException(
             status_code=403,
-            detail=f"{user.email!r} is authenticated but not authorized to approve cutovers.",
+            # Names the role, not the caller — same reasoning as
+            # authorize_estate above. "You are signed in, but this needs
+            # the approver role" is the actionable half.
+            detail="The 'approver' role is required to approve cutovers.",
         )
     return user.email

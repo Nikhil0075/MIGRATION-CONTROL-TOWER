@@ -80,7 +80,7 @@ export function LineagePage(props: PageProps) {
           </>
         }
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <div class="lineage-layout">
           <Panel
@@ -172,7 +172,7 @@ export function EvaluationsPage(props: PageProps) {
         description="Scenario evidence and bounded scale measurements."
         generatedAt={state.generatedAt}
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {state.data && (
         <div class="workspace-grid">
           <Panel title="Evaluation runs">

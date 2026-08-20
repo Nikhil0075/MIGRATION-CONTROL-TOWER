@@ -51,7 +51,7 @@ export function IncidentsPage(props: PageProps) {
           </button>
         }
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {data && (
         <>
           <div class="metric-grid">
@@ -153,7 +153,7 @@ export function DeadLettersPage(props: PageProps) {
           </button>
         }
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {data && (
         <>
           <Panel
@@ -262,7 +262,7 @@ export function MemoryBankPage(props: PageProps) {
         description="Confirmed remediations, kept across runs and cited as evidence by later ones."
         generatedAt={state.generatedAt}
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {data && (
         <>
           <div class="metric-grid">
@@ -385,7 +385,7 @@ export function ApprovalsPage(props: PageProps) {
           </button>
         }
       />
-      <PageState loading={state.loading} error={state.error} />
+      <PageState loading={state.loading} error={state.error} status={state.status} />
       {data && (
         <>
           <div class="metric-grid">

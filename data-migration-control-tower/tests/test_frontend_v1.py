@@ -596,3 +596,46 @@ def test_omitting_the_estate_still_falls_back_to_the_default(
         json={**body, "justification": "Checking the absent estate path"},
     )
     assert response.status_code == 202
+
+
+def test_a_refusal_never_echoes_the_caller_back_at_them(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 403 should say what is required, not who you are.
+
+    The console renders the backend `detail` verbatim, so this string
+    printed the signed-in user's email address into the page — and from
+    there into screenshots, support tickets and error reporting. It told
+    the reader nothing they did not already know, while disclosing the
+    session identity on any shared or projected screen.
+    """
+    from firebase_admin import auth
+
+    _claims(monkeypatch, "operator")
+    email = "contract-user@example.internal"
+    monkeypatch.setattr(
+        auth,
+        "verify_id_token",
+        lambda _token: {
+            "uid": "scoped",
+            "email": email,
+            "estate_roles": {"mine": ["viewer", "operator"]},
+        },
+    )
+
+    response = client.post(
+        "/api/v1/assessments",
+        headers=_headers(**{"Idempotency-Key": "refusal-wording"}),
+        json={
+            "pack_id": "wwi_sqlserver_v1",
+            "estate_id": "not-mine",
+            "justification": "Checking the refusal wording",
+        },
+    )
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert email not in detail, f"the refusal named the caller: {detail!r}"
+    # What IS useful: the role and the estate, which is what someone has
+    # to be granted to get past this.
+    assert "operator" in detail
+    assert "not-mine" in detail
