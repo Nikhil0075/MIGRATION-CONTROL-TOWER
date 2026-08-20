@@ -95,6 +95,7 @@ def test_a_connection_profile_carrying_a_password_is_rejected(client, estate_cle
     assert "hunter2" not in response.text
 
 
+@pytest.mark.requires_firestore
 def test_created_estate_response_contains_no_credential(client, estate_cleanup):
     estate_id = f"test-{uuid.uuid4().hex[:8]}"
     estate_cleanup.append(estate_id)
@@ -281,6 +282,7 @@ def test_adapter_types_are_discoverable(client):
     assert "transfer" not in by_name["oracle_corpus"]["capabilities"]
 
 
+@pytest.mark.requires_firestore
 def test_pack_execution_support_is_derived_not_hardcoded(client):
     packs = {p["pack_id"]: p for p in client.get("/api/v1/assessments", headers={"Authorization": "Bearer t"}).json()["data"]["packs"]}
     assert packs["wwi_sqlserver_v1"]["execution_supported"] is True

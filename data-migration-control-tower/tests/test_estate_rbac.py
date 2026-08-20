@@ -492,6 +492,7 @@ def test_the_two_allowlists_grant_different_things(monkeypatch):
     assert sme.has_role("approver", "e") and not sme.has_role("operator", "e")
 
 
+@pytest.mark.requires_firestore
 def test_an_allowlisted_operator_can_actually_onboard(client, monkeypatch):
     """End to end: the allowlist is what unblocks POST /api/v1/estates."""
     from firebase_admin import auth

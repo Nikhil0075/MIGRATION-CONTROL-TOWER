@@ -174,6 +174,7 @@ def test_the_pack_is_assessment_only_until_someone_decides_otherwise(pack):
 
 
 @pytest.mark.requires_postgres
+@pytest.mark.requires_firestore
 def test_health_check_reports_without_leaking_the_credential(adapter):
     import os
 

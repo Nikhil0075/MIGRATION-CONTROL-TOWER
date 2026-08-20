@@ -35,13 +35,13 @@ from tests.conftest import seed_migration_plan  # noqa: E402
 
 
 def _firestore_reachable() -> bool:
-    try:
-        from tools.firestore_client import get_client
+    # Delegates to the shared probe, which performs a real round trip.
+    # This used to call `get_client()` and return True — but the Firestore
+    # client is lazy and does no I/O when constructed, so it answered True
+    # whenever the import worked, and the skipif below never skipped.
+    from tests.probes import firestore_reachable
 
-        get_client()
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    return firestore_reachable()
 
 
 skip_if_no_firestore = pytest.mark.skipif(not _firestore_reachable(), reason="Firestore not reachable")

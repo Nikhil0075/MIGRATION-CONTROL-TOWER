@@ -330,6 +330,63 @@ Get-NetTCPConnection -LocalPort 8080 -State Listen | ForEach-Object { Stop-Proce
 
 ---
 
+## Where the tests write
+
+`pytest` writes to a **separate Firestore database**, never to the one the
+console reads. `tests/conftest.py` sets `FIRESTORE_DATABASE` for the whole
+session before anything builds a client.
+
+This is not hygiene for its own sake. When the suite shared `(default)`,
+the live project accumulated hundreds of `test_run_*` documents and 9,891
+orphaned subcollection records — and because collection-group queries here
+run unfiltered (no composite index exists for group + `order_by`, see
+CLAUDE.md), the console paid to stream every one of them on each uncached
+request. `catalog` alone was 6,428 dead documents out of 9,090.
+
+Provision and seed it once:
+
+```bash
+bash infrastructure/gcp_setup.sh
+```
+
+```bash
+python -m infrastructure.seed_test_database
+```
+
+`gcp_setup.sh` creates the database; the seeder gives it the same baseline
+a real deployment has — an Agent Registry with APPROVED cards, and the
+committed estates. Both are idempotent.
+
+Until the database exists, Firestore-backed tests **skip** with a message
+naming these two commands. They deliberately do not fall back to
+`(default)`: a silent fallback would put the writes back into production
+at exactly the moment nobody is watching.
+
+| Variable | Meaning |
+|---|---|
+| `MCT_TEST_FIRESTORE_DATABASE` | Names the test database. Default `mct-tests`. |
+| `MCT_TESTS_MAY_WRITE_PRODUCTION=1` | Runs the suite against `(default)`. Exact match on `1` — `true` and `yes` do not count. |
+
+The opt-out exists for a one-off check against real data. It is not a
+normal way to run the suite.
+
+### Clearing orphans that already exist
+
+`delete_run` now removes a run's subcollections along with the run, so the
+backlog cannot rebuild. For anything already there:
+
+```bash
+python -m tools.purge_orphans
+```
+
+```bash
+python -m tools.purge_orphans --apply
+```
+
+The first prints counts and deletes nothing. The second writes every
+document to a JSONL rescue copy under `var/` before deleting, and refuses
+to delete at all if that export fails.
+
 ## Cleaning up
 
 An estate referenced by runs is disabled, never deleted — run history

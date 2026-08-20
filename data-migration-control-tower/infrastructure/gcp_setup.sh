@@ -55,6 +55,20 @@ else
   echo "    Firestore database already exists, skipping."
 fi
 
+# A second database, so that `pytest` never writes to the one the console
+# reads. It used to: the live project accumulated hundreds of test_run_*
+# documents and 9,891 orphaned subcollection records, and because
+# collection-group queries here run unfiltered (no composite index for
+# group + order_by, see CLAUDE.md), the console paid to stream all of it
+# on every uncached request. tests/conftest.py points the suite here.
+TEST_DATABASE="${MCT_TEST_FIRESTORE_DATABASE:-mct-tests}"
+echo "==> Ensuring Firestore test database '$TEST_DATABASE' exists..."
+if ! gcloud firestore databases describe --database="$TEST_DATABASE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+  gcloud firestore databases create     --database="$TEST_DATABASE"     --location="$REGION"     --type=firestore-native     --project="$PROJECT_ID"
+else
+  echo "    Test database already exists, skipping."
+fi
+
 echo "==> Ensuring BigQuery dataset '$BQ_DATASET' exists..."
 if ! bq --project_id="$PROJECT_ID" show "${PROJECT_ID}:${BQ_DATASET}" >/dev/null 2>&1; then
   bq --project_id="$PROJECT_ID" mk --dataset --location="$REGION" "${PROJECT_ID}:${BQ_DATASET}"
@@ -256,6 +270,7 @@ echo "==> Done. Summary:"
 echo "    Project:        $PROJECT_ID"
 echo "    Region:         $REGION"
 echo "    Firestore:      (default) native mode"
+echo "    Firestore test: $TEST_DATABASE (pytest writes here, never (default))"
 echo "    BigQuery:       ${PROJECT_ID}:${BQ_DATASET}"
 echo "    Pub/Sub topics: ${TOPICS[*]}"
 echo "    Pub/Sub subs:   ${!SUBSCRIPTIONS[*]}"

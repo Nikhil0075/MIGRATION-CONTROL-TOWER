@@ -56,19 +56,43 @@ os.environ["CONTROL_TOWER_WORKERS"] = "0"
 
 
 # ---------------------------------------------------------------------------
+# Which Firestore database this session may write to
+# ---------------------------------------------------------------------------
+#
+# The suite used to write to `(default)` — the same database the console
+# reads. That is how the live project accumulated hundreds of
+# `test_run_*` documents and 9,891 orphaned subcollection records, and
+# why the console paid to stream them on every uncached request (see
+# tools/purge_orphans.py).
+#
+# The session now targets a separate database by default. Set, not
+# setdefault, for the same reason CONTROL_TOWER_WORKERS is: a value
+# inherited from .env is the developer's console configuration, and it
+# must not decide where the tests write.
+#
+# MCT_TEST_FIRESTORE_DATABASE names it. The escape hatch is deliberately
+# ugly and explicit — writing to production from a test run should be a
+# thing someone chose, not a thing that happened.
+from tests.probes import resolve_test_database  # noqa: E402
+
+TEST_DATABASE = resolve_test_database(dict(os.environ))
+if TEST_DATABASE is None:
+    os.environ.pop("FIRESTORE_DATABASE", None)
+else:
+    os.environ["FIRESTORE_DATABASE"] = TEST_DATABASE
+
+
+# ---------------------------------------------------------------------------
 # Reachability probes — cached, so N modules cost one connection attempt each
 # ---------------------------------------------------------------------------
 
 
-@functools.lru_cache(maxsize=1)
-def firestore_reachable() -> bool:
-    try:
-        from tools.firestore_client import get_client
-
-        next(get_client().collections(), None)
-        return True
-    except Exception:  # noqa: BLE001 — any failure means "skip", never "fail"
-        return False
+# Reachability of the database this session is pointed at. Note what it
+# does NOT do: fall back to `(default)` when the test database is
+# missing. Skipping is the correct outcome — a silent fallback would put
+# the writes back into production, which is the whole thing this is
+# preventing, and it would do it at exactly the moment nobody is looking.
+from tests.probes import firestore_reachable, firestore_skip_reason  # noqa: E402
 
 
 @functools.lru_cache(maxsize=1)
@@ -138,7 +162,7 @@ def bigquery_reachable() -> bool:
 
 
 _PROBES = {
-    "requires_firestore": (firestore_reachable, "Firestore not reachable"),
+    "requires_firestore": (firestore_reachable, firestore_skip_reason()),
     "requires_sqlserver": (sqlserver_reachable, "SQL Server container not reachable"),
     "requires_postgres": (postgres_reachable, "Postgres fixture container not reachable"),
     "requires_bigquery": (bigquery_reachable, "BigQuery not reachable"),

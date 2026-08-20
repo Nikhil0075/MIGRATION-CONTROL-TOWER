@@ -200,6 +200,7 @@ def test_the_scope_dependency_is_async_so_sync_endpoints_can_see_it():
     assert inspect.iscoroutinefunction(api_v1._scope_reads)
 
 
+@pytest.mark.requires_firestore
 def test_a_single_estate_viewer_gets_one_estate_from_an_unscoped_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

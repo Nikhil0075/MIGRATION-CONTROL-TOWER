@@ -18,13 +18,13 @@ sys.path.insert(0, str(REPO_ROOT))
 
 
 def _firestore_reachable() -> bool:
-    try:
-        from tools.firestore_client import get_client
+    # Delegates to the shared probe, which performs a real round trip.
+    # This used to call `get_client()` and return True — but the Firestore
+    # client is lazy and does no I/O when constructed, so it answered True
+    # whenever the import worked, and the skipif below never skipped.
+    from tests.probes import firestore_reachable
 
-        get_client()
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    return firestore_reachable()
 
 
 skip_if_no_firestore = pytest.mark.skipif(not _firestore_reachable(), reason="Firestore not reachable")
@@ -150,6 +150,7 @@ def test_approve_rejects_missing_justification(authed_client):
         delete_run(run_id)
 
 
+@pytest.mark.requires_firestore
 def test_response_has_security_headers(client):
     """Day 10 hardening: CSP + hardening headers on every response, not
     just the approve endpoint."""
@@ -159,6 +160,7 @@ def test_response_has_security_headers(client):
     assert response.headers["X-Frame-Options"] == "DENY"
 
 
+@pytest.mark.requires_firestore
 def test_csp_allows_the_hosts_firebase_signin_popup_actually_needs(client):
     """Regression test for a real bug found live: signInWithPopup()'s
     gapi-based CORS-relay iframe is served from apis.google.com, and the
@@ -179,6 +181,7 @@ def test_csp_allows_the_hosts_firebase_signin_popup_actually_needs(client):
     assert "https://apis.google.com" in script_directive
 
 
+@pytest.mark.requires_firestore
 def test_run_plan_404_for_run_without_a_plan(client):
     from agents.orchestrator.run_lifecycle import create_run, delete_run
 

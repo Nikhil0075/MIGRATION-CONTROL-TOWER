@@ -104,6 +104,7 @@ def test_fetch_source_rows_batches_via_recording_executor():
 
 
 @skip_if_no_live_infra
+@pytest.mark.requires_firestore
 def test_execute_migration_clean_load_matches_source_count():
     """drop_fraction=0.0: target_count must equal the real source row count."""
     manifest = execute_migration(
@@ -120,6 +121,7 @@ def test_execute_migration_clean_load_matches_source_count():
 
 
 @skip_if_no_live_infra
+@pytest.mark.requires_firestore
 def test_execute_migration_drop_fraction_is_exact():
     """drop_fraction > 0 must drop exactly ceil(source_count * fraction)
     rows — the same deterministic arithmetic as before streaming."""
