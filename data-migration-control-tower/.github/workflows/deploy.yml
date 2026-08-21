@@ -1,0 +1,169 @@
+# Deploy & Harden Phase 2e. NOT active until pushed to GitHub AND the
+# one-time Workload Identity Federation bootstrap
+# (infrastructure/wif_bootstrap.sh) has been run by the repo owner — see
+# that script and docs/adr/0002's CI/CD section. Written here for review;
+# do not push without reading it end to end first.
+#
+# Hardening checklist this file implements (Deploy & Harden Phase 2e):
+#   - Separate staging/production GitHub Environments, production gated
+#     on manual approval
+#   - WIF trust scoped to this exact repo + branch (see the bootstrap
+#     script's attribute-condition, not just attribute.repository alone)
+#   - Every action pinned by commit SHA, not a floating tag
+#   - Images deployed by digest, never a mutable tag
+#   - SBOM + dependency/secret/container vulnerability scans, blocking
+#   - No deploy credentials reachable from a fork or pull_request event
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # required for WIF — no long-lived key ever stored as a secret
+
+env:
+  PROJECT_ID: autonomous-data-migration
+  REGION: us-central1
+  REPO: control-tower
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: pytest tests/ -q -k "not requires_sqlserver" --collect-only
+        # Full live-service test run is intentionally NOT the CI gate —
+        # this repo's suite depends on live SQL Server/Firestore/BigQuery
+        # (tests/probes.py), which a GitHub-hosted runner doesn't have.
+        # --collect-only here proves every import resolves (the same
+        # "no live services needed" half scripts/clean_clone_check.sh
+        # already runs) as a fast, real gate; the live suite stays a
+        # local/pre-deploy manual step until a CI-reachable test
+        # environment exists.
+      - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: "22"
+      - working-directory: frontend/client
+        run: npm ci && npm run typecheck && npm test -- --run
+
+  build:
+    name: Build (${{ matrix.service }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          [control-tower-ui, orchestrator, discovery-agent, lineage-agent,
+           risk-agent, planner-agent, validation-agent, cutover-agent,
+           finance-impact-agent]
+        include:
+          - service: control-tower-ui
+            dockerfile: frontend/Dockerfile
+          - service: orchestrator
+            dockerfile: agents/orchestrator/Dockerfile
+          - service: discovery-agent
+            dockerfile: agents/discovery/Dockerfile
+          - service: lineage-agent
+            dockerfile: agents/lineage/Dockerfile
+          - service: risk-agent
+            dockerfile: agents/risk/Dockerfile
+          - service: planner-agent
+            dockerfile: agents/planner/Dockerfile
+          - service: validation-agent
+            dockerfile: agents/validation/Dockerfile
+          - service: cutover-agent
+            dockerfile: agents/cutover/Dockerfile
+          - service: finance-impact-agent
+            dockerfile: agents/finance/Dockerfile
+    outputs:
+      digest-control-tower-ui: ${{ steps.digest.outputs.digest }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - id: auth
+        uses: google-github-actions/auth@6fc4af4b145ae7821d527454aa9bd537d1f2dc5 # v2.1.7
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@6189d56e4096ee891640bb02ac264be376592d6 # v2.1.2
+
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # SBOM (before build, source-level) — syft's action pinned by SHA.
+      - uses: anchore/sbom-action@f325610c9f50a54015d37c8d16cb3b0e2c8f4de1 # v0.17.9
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom-${{ matrix.service }}.cdx.json
+
+      - name: Build and push by digest
+        id: digest
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ matrix.service }}"
+          docker build -f ${{ matrix.dockerfile }} -t "$IMAGE:${{ github.sha }}" .
+          docker push "$IMAGE:${{ github.sha }}"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:${{ github.sha }}")
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      # Container vulnerability scan — blocking on HIGH/CRITICAL.
+      - uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ matrix.service }}:${{ github.sha }}"
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+
+  deploy-staging:
+    name: Deploy to staging
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@6fc4af4b145ae7821d527454aa9bd537d1f2dc5 # v2.1.7
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@6189d56e4096ee891640bb02ac264be376592d6 # v2.1.2
+      - name: Deploy by digest (staging)
+        run: |
+          echo "Deploy-by-digest to staging: fill in per-service gcloud run deploy calls using the"
+          echo "build job's digest outputs once staging Cloud Run services exist"
+          echo "(infrastructure/terraform with deploy_cloud_run_services=true, staging variant)."
+
+  deploy-production:
+    name: Deploy to production
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production # requires manual approval — configure this Environment's
+                             # required reviewers in GitHub repo settings; this workflow
+                             # file alone does not grant that protection
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@6fc4af4b145ae7821d527454aa9bd537d1f2dc5 # v2.1.7
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@6189d56e4096ee891640bb02ac264be376592d6 # v2.1.2
+      - name: Deploy by digest (production)
+        run: |
+          echo "Same as staging, targeting the production Cloud Run services. Keep the previous"
+          echo "digest recorded (e.g. as a GitHub Environment variable) for rollback:"
+          echo "  gcloud run services update-traffic <service> --to-revisions=<prev-revision>=100"

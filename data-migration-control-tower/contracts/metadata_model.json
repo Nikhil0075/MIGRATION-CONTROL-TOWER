@@ -651,15 +651,21 @@
         },
         "runtime": {
           "type": "object",
+          "description": "Deploy & Harden Phase 2c (docs/adr/0002-typed-http-dispatch.md): type='local' (the default, every card as of Phase 1) means tools/registry.py::invoke_capability() dynamically imports and calls `handler` in-process. type='cloud_run' means it POSTs a typed CapabilityRequest to `url`/invoke instead (tools/capability_dispatch_client.py) — `url` is then required and `service_account` documents which identity the deployed service runs under (informational; the actual OIDC caller-allowlist enforcement lives server-side in tools/capability_http_server.py, not in this card).",
           "properties": {
             "type": {
-              "type": "string"
+              "type": "string",
+              "enum": ["local", "cloud_run"]
             },
             "service_account": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "url": {
+              "type": ["string", "null"],
+              "description": "Required when type='cloud_run' — the deployed service's base URL, e.g. https://discovery-agent-xyz-uc.a.run.app. Null/absent for type='local'."
             }
           }
         },

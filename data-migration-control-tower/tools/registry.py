@@ -265,6 +265,33 @@ def invoke_capability(capability: str, *args, **kwargs):
     if decision["decision"] != policy_engine.DECISION_ALLOW:
         raise CapabilityDenied(decision)
 
+    runtime = card.get("runtime") or {}
+    if runtime.get("type") == "cloud_run":
+        # Deploy & Harden Phase 2c (docs/adr/0002-typed-http-dispatch.md):
+        # this card is served by an independently-deployed Cloud Run
+        # service, not this process — call it over a typed, OIDC-verified
+        # HTTP envelope instead of dynamically importing its handler.
+        # estate_id isn't in invoke_capability()'s own signature (callers
+        # pass it as a kwarg like any other handler argument, e.g.
+        # discover_estate(estate_id=...)), so it's read the same
+        # best-effort way run_id is above, not required.
+        from tools.capability_dispatch_client import invoke_remote_capability
+
+        service_url = runtime.get("url")
+        if not service_url:
+            raise CapabilityDenied(
+                {**decision, "reason": f"card {card['agent_id']!r} declares runtime.type=cloud_run but no url"}
+            )
+        result = invoke_remote_capability(
+            service_url=service_url,
+            capability=capability,
+            args=list(args),
+            kwargs=kwargs,
+            run_id=run_id,
+            estate_id=kwargs.get("estate_id"),
+        )
+        return result, card["agent_id"], card["version"]
+
     module_path, func_name = card["handler"].split(":")
     module = importlib.import_module(module_path)
     handler = getattr(module, func_name)

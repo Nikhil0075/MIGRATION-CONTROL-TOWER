@@ -58,7 +58,11 @@ def registered():
 
 
 def _make_card(
-    agent_id: str, capability: str, handler: str = "os:getcwd", permissions_key: str | None = None
+    agent_id: str,
+    capability: str,
+    handler: str = "os:getcwd",
+    permissions_key: str | None = None,
+    runtime: dict | None = None,
 ) -> dict:
     card = {
         "agent_id": agent_id,
@@ -67,7 +71,7 @@ def _make_card(
         "owner": {"team": "QA", "department": "Testing"},
         "capabilities": [capability],
         "handler": handler,
-        "runtime": {"type": "local"},
+        "runtime": runtime or {"type": "local"},
         "permissions": {},
     }
     if permissions_key is not None:
@@ -205,6 +209,63 @@ def test_invoke_capability_denies_when_permissions_key_missing():
             registry.invoke_capability(capability)
     finally:
         registry.delete_card(agent_id, "1.0.0")
+
+
+# -- Typed HTTP dispatch: runtime.type == "cloud_run" (Deploy & Harden Phase 2c) --
+
+
+@skip_if_no_firestore
+def test_invoke_capability_routes_a_cloud_run_card_through_the_http_client(registered, monkeypatch):
+    calls = []
+
+    def fake_invoke_remote(**kwargs):
+        calls.append(kwargs)
+        return {"tables": 3}
+
+    monkeypatch.setattr(
+        "tools.capability_dispatch_client.invoke_remote_capability", fake_invoke_remote
+    )
+    monkeypatch.setattr(
+        policy_engine, "evaluate", lambda *a, **k: {"decision": policy_engine.DECISION_ALLOW}
+    )
+
+    agent_id = f"test-agent-{uuid.uuid4().hex[:8]}"
+    capability = f"test.remote.{uuid.uuid4().hex[:8]}"
+    registered(
+        _make_card(
+            agent_id,
+            capability,
+            runtime={"type": "cloud_run", "url": "https://discovery-agent.example.run.app"},
+        ),
+        published_by="pub@example.internal",
+    )
+    registry.approve(agent_id, "1.0.0", approved_by="governance@example.internal")
+
+    result, resolved_agent_id, resolved_version = registry.invoke_capability(
+        capability, estate_id="wwi-demo-estate", run_id="run-1"
+    )
+    assert result == {"tables": 3}
+    assert resolved_agent_id == agent_id
+    assert calls[0]["service_url"] == "https://discovery-agent.example.run.app"
+    assert calls[0]["capability"] == capability
+    assert calls[0]["kwargs"] == {"estate_id": "wwi-demo-estate", "run_id": "run-1"}
+
+
+@skip_if_no_firestore
+def test_a_cloud_run_card_with_no_url_is_denied_rather_than_crashing(registered, monkeypatch):
+    monkeypatch.setattr(
+        policy_engine, "evaluate", lambda *a, **k: {"decision": policy_engine.DECISION_ALLOW}
+    )
+    agent_id = f"test-agent-{uuid.uuid4().hex[:8]}"
+    capability = f"test.remote.nourl.{uuid.uuid4().hex[:8]}"
+    registered(
+        _make_card(agent_id, capability, runtime={"type": "cloud_run"}),
+        published_by="pub@example.internal",
+    )
+    registry.approve(agent_id, "1.0.0", approved_by="governance@example.internal")
+
+    with pytest.raises(registry.CapabilityDenied, match="no url"):
+        registry.invoke_capability(capability)
 
 
 @skip_if_no_firestore

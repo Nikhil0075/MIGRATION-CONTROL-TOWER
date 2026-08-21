@@ -1,0 +1,119 @@
+# Matches infrastructure/gcp_setup.sh's Pub/Sub provisioning (§8.1 event
+# topics), plus the new push-subscription wiring Deploy & Harden Phase 2b
+# needs once deploy_cloud_run_services=true. Dead-lettering matches
+# gcp_setup.sh's existing policy (10 delivery attempts).
+
+resource "google_pubsub_topic" "topic" {
+  for_each = toset(var.pubsub_topics)
+
+  project = var.project_id
+  name    = each.value
+}
+
+resource "google_pubsub_topic" "dead_letter" {
+  project = var.project_id
+  name    = "dead-letter"
+}
+
+# Pub/Sub's own service agent needs publish rights on the dead-letter
+# topic to actually forward failed messages there.
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+resource "google_pubsub_topic_iam_member" "pubsub_service_agent_dead_letter_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.dead_letter.name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
+# -- Pull subscriptions (unchanged from today's shape — kept for any
+#    consumer not yet split onto its own Cloud Run service, and for
+#    local dev via tools/worker_supervisor.py) -----------------------
+
+locals {
+  # subscription_name -> topic — matches
+  # tools/worker_supervisor.py::default_specs()'s ConsumerSpec list.
+  pull_subscriptions = {
+    "assessment-requested-sub"      = "assessment.requested"
+    "migration-requested-sub"       = "migration.requested"
+    "discovery-completed-sub"       = "discovery.completed"
+    "risk-assessed-sub"             = "risk.assessed"
+    "plan-created-sub"              = "plan.created"
+    "validation-requested-sub"      = "validation.requested"
+    "approval-preparation-sub"      = "validation.passed"
+    "validation-failed-sub"         = "validation.failed"
+    "cutover-approved-sub"          = "cutover.approved"
+    # validation-passed-sub deliberately NOT created as a competing
+    # consumer here — advance_through_validation's assertion-only
+    # subscription is test/eval scoped, not part of the deployed
+    # topology (see tools/worker_supervisor.py's own docstring on this).
+  }
+}
+
+resource "google_pubsub_subscription" "pull" {
+  for_each = local.pull_subscriptions
+
+  project = var.project_id
+  name    = each.key
+  topic   = google_pubsub_topic.topic[each.value].name
+
+  ack_deadline_seconds = var.ack_deadline_seconds
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.dead_letter.id
+    max_delivery_attempts = var.max_delivery_attempts
+  }
+}
+
+resource "google_pubsub_subscription" "dead_letter_sub" {
+  project = var.project_id
+  name    = "dead-letter-sub"
+  topic   = google_pubsub_topic.dead_letter.name
+}
+
+# -- Push subscriptions (Deploy & Harden Phase 2b): one per consumer the
+#    orchestrator/discovery/cutover Cloud Run services own, only created
+#    once those services actually exist (deploy_cloud_run_services=true).
+#    Wiring this in the SAME Terraform config as the services avoids the
+#    two-phase "deploy, then wire subscriptions" chicken-and-egg problem
+#    a hand-run gcloud script would have — Terraform resolves the
+#    dependency ordering (service URL -> push endpoint) automatically. --
+
+locals {
+  # push subscription name -> {topic, path on the owning service}
+  push_targets = {
+    "migration-requested-push"  = { topic = "migration.requested", service = "orchestrator", path = "/push/migration" }
+    "discovery-completed-push"  = { topic = "discovery.completed", service = "orchestrator", path = "/push/discovery" }
+    "risk-assessed-push"        = { topic = "risk.assessed", service = "orchestrator", path = "/push/risk" }
+    "plan-created-push"         = { topic = "plan.created", service = "orchestrator", path = "/push/plan" }
+    "validation-requested-push" = { topic = "validation.requested", service = "orchestrator", path = "/push/validation" }
+    "validation-passed-push"    = { topic = "validation.passed", service = "orchestrator", path = "/push/approval" }
+    "validation-failed-push"    = { topic = "validation.failed", service = "orchestrator", path = "/push/recovery" }
+    "assessment-requested-push" = { topic = "assessment.requested", service = "discovery-agent", path = "/push/assessment" }
+    "cutover-approved-push"     = { topic = "cutover.approved", service = "cutover-agent", path = "/push/cutover" }
+  }
+}
+
+resource "google_pubsub_subscription" "push" {
+  for_each = var.deploy_cloud_run_services ? local.push_targets : {}
+
+  project = var.project_id
+  name    = each.key
+  topic   = google_pubsub_topic.topic[each.value.topic].name
+
+  ack_deadline_seconds = var.ack_deadline_seconds
+
+  push_config {
+    push_endpoint = "${google_cloud_run_v2_service.service[each.value.service].uri}${each.value.path}"
+    oidc_token {
+      service_account_email = google_service_account.pubsub_invoker.email
+    }
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.dead_letter.id
+    max_delivery_attempts = var.max_delivery_attempts
+  }
+}

@@ -3,6 +3,10 @@ python-dotenv==1.0.1
 pydantic==2.9.2
 jsonschema==4.23.0
 PyYAML>=6.0.2  # policies/*.yaml (agent permissions, data classification)
+# Direct dependency of tools/capability_dispatch_client.py (Deploy &
+# Harden Phase 2c) — was already present transitively via other GCP
+# packages, pinned explicitly now that this project imports it directly.
+requests>=2.32
 
 # Legacy source connectivity
 # >=5.2 for prebuilt wheels on newer Python versions (5.1.0 forces a
