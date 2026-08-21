@@ -1952,19 +1952,63 @@ def evaluations(
     estate_id: str | None = Query(default=None),
     user: UserContext = Depends(get_user_context),
 ) -> dict:
+    """Deploy & Harden Phase 4d: surfaces all THREE distinct scale
+    measurements (docs/EVALUATION.md) as separate panels, not one
+    number — control-plane object-count tiers, the real-rows-moved
+    data-plane measurement, and concurrent operational-load runs.
+    scale_metrics/scale_report_* are kept exactly as they were (the
+    latest control-plane tier, via the "current" alias
+    evaluation/scale_harness.py::write_report() still writes) so nothing
+    already consuming this endpoint's shape breaks.
+    """
     _authorize_read(user, estate_id)
     client = get_client()
     evaluation_runs = [d.to_dict() or {} for d in client.collection("evaluation_runs").limit(100).stream()]
     if estate_id:
         evaluation_runs = [item for item in evaluation_runs if (item.get("estate_id") or DEFAULT_ESTATE_ID) == estate_id]
+
     scale_snapshot = client.collection("evaluation_scale_reports").document("current").get()
     scale_metrics = scale_snapshot.to_dict() if scale_snapshot.exists else None
+
+    # Every control-plane tier ever run (Phase 4b's tier-keyed docs),
+    # not just the latest — "current" is excluded since it's an alias,
+    # not a distinct tier.
+    scale_tier_docs = [
+        d.to_dict() for d in client.collection("evaluation_scale_reports").stream() if d.id != "current"
+    ]
+    scale_metrics_by_tier = {
+        str(doc.get("pipeline_count")): doc for doc in scale_tier_docs if doc and doc.get("pipeline_count") is not None
+    }
+
+    data_plane_docs = [
+        d.to_dict()
+        for d in client.collection("evaluation_data_plane_reports").order_by(
+            "generated_at", direction="DESCENDING"
+        ).limit(10).stream()
+    ]
+    data_plane_metrics = data_plane_docs[0] if data_plane_docs else None
+
+    load_docs = [
+        d.to_dict()
+        for d in client.collection("evaluation_load_reports").order_by(
+            "generated_at", direction="DESCENDING"
+        ).limit(10).stream()
+    ]
+    operational_load_metrics = load_docs[0] if load_docs else None
+
     return _envelope(
         {
             "runs": sorted(evaluation_runs, key=lambda item: item.get("started_at", ""), reverse=True),
             "scale_metrics": scale_metrics,
             "scale_report_status": "available" if scale_metrics else "not_configured",
             "scale_report_reason": None if scale_metrics else "Run evaluation/scale_harness.py to persist measured scale metrics.",
+            "scale_metrics_by_tier": scale_metrics_by_tier,
+            "data_plane_metrics": data_plane_metrics,
+            "data_plane_status": "available" if data_plane_metrics else "not_configured",
+            "data_plane_reason": None if data_plane_metrics else "Run evaluation/data_plane_scale_test.py to persist a real rows-moved measurement.",
+            "operational_load_metrics": operational_load_metrics,
+            "operational_load_status": "available" if operational_load_metrics else "not_configured",
+            "operational_load_reason": None if operational_load_metrics else "Run evaluation/load_test.py to persist a concurrent-load measurement.",
         }
     )
 

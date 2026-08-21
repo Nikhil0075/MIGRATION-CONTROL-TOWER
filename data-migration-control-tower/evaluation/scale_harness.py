@@ -4,21 +4,41 @@
 typed into the UI. Separate metadata/control-plane scale from bulk-data
 scale so the experiment remains affordable and interpretable.").
 
-Generates N synthetic pipeline definitions (default 250 — within this
-phase's declared 100-500 bound; no real data volume, no live SQL
-Server/BigQuery table reads) and pushes them through three real control-
-plane operations, timing each:
+Generates N synthetic pipeline definitions (default 250) and pushes
+them through three real control-plane operations, timing each:
   1. Pipeline-record schema validation (contracts/metadata_model.json)
   2. tools/wave_manager.py::evaluate_wave() scheduling
   3. tools/policy_engine.py::evaluate() decisions (a bounded sample —
      each call is a real Firestore write, so this is capped to keep the
      harness's own cost affordable)
 
+No live data reads, no model calls, no BigQuery/Vertex AI touched at
+any --count — deliberately control-plane-only (see model_calls in the
+returned metrics, always 0, stated explicitly rather than silently
+implied). This is genuinely cheap to run even at the 1k/5k/20k tiers
+Deploy & Harden Phase 4 approved: the only real GCP cost is Firestore
+writes (one per synthetic pipeline for schema/wave timing, capped at
+POLICY_SAMPLE_SIZE for the policy-decision sample regardless of
+--count) — see evaluation/estimate_ladder_cost.py for the full-stack
+estimate methodology this harness's own low cost is one input to.
+
+**Call this "a control-plane planning and scheduling benchmark," never
+"an N-object migration."** It proves schema validation / wave
+scheduling / policy-decision behavior scales with metadata OBJECT
+COUNT — it moves zero rows and zero bytes. Data-plane scale (real
+rows/bytes moved) is evaluation/data_plane_scale_test.py's job, and
+operational load (concurrent runs/users, Pub/Sub backlog) is
+evaluation/load_test.py's — three distinct measurements, reported
+separately, never folded into one "scale" number (docs/EVALUATION.md).
+
 Writes evaluation/reports/scale_metrics.md — generated, never hand-
-typed, the same discipline as tools/evaluation_harness.py. This is
-explicitly a control-plane-scale demonstration at 100-500 definitions,
-NOT the master doc's 20,000-definition bulk-data claim — say so in any
-write-up that cites these numbers.
+typed, the same discipline as tools/evaluation_harness.py. Also writes
+a durable Firestore record PER TIER (evaluation_scale_reports/{count}),
+not a single overwritten "current" doc — Deploy & Harden Phase 4b's
+fix so a 1k, 5k, and 20k run don't clobber each other; a "current"
+alias is kept pointing at whichever tier ran most recently so existing
+consumers (frontend/api_v1.py::evaluations()) don't need to change to
+keep working, though Phase 4d extends them to read every tier.
 
 Usage (from repo root):
     python evaluation/scale_harness.py [--count 250]
@@ -107,17 +127,34 @@ def run_scale_demo(count: int) -> dict:
         policy_evaluate(agent_key="discovery", action="source.catalog.sql_server", resource_class="METADATA")
         policy_latencies_ms.append((time.perf_counter() - start) * 1000)
 
+    # Throughput: records/sec, derived from the existing latency data —
+    # Deploy & Harden Phase 4b. Schema validation and wave scheduling
+    # each get their own figure since they're timed separately above;
+    # there's no single combined "records/sec" that would mean anything
+    # (the two operations don't run concurrently in this harness).
+    schema_total_s = sum(validate_latencies_ms) / 1000
+    schema_throughput = round(count / schema_total_s, 1) if schema_total_s > 0 else None
+    wave_throughput = round(count / (wave_duration_ms / 1000), 1) if wave_duration_ms > 0 else None
+
     return {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "pipeline_count": count,
+        # Explicit, not silently absent — this harness never calls a
+        # model at any --count; a real model-cost sample comes from a
+        # separate, much smaller (~20-call) benchmark against a live
+        # end-to-end run instead (docs/EVALUATION.md).
+        "model_calls": 0,
+        "model_calls_note": "control-plane-only — this harness never calls a model at any scale",
         "schema_validation": {
             "p50_ms": round(_percentile(validate_latencies_ms, 50), 3),
             "p95_ms": round(_percentile(validate_latencies_ms, 95), 3),
             "total_ms": round(sum(validate_latencies_ms), 2),
+            "throughput_per_sec": schema_throughput,
         },
         "wave_scheduling": {
             "total_duration_ms": round(wave_duration_ms, 2),
             "avg_per_item_ms": round(wave_duration_ms / count, 4) if count else 0.0,
+            "throughput_per_sec": wave_throughput,
             "admitted": admitted,
             "held": held,
             "backlog_escalated": escalated,
@@ -133,44 +170,68 @@ def run_scale_demo(count: int) -> dict:
 def write_report(metrics: dict, reports_dir: Path = REPORTS_DIR) -> Path:
     reports_dir.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# Bounded control-plane scale demonstration (master doc §32.12)",
+        "# Control-plane planning and scheduling benchmark (master doc §32.12)",
         "",
         f"Generated {metrics['generated_at']} · {metrics['pipeline_count']} synthetic pipeline definitions.",
         "",
-        "**This is a control-plane-scale demonstration at 100-500 definitions, "
-        "not the master doc's 20,000-definition bulk-data claim** — that would need "
-        "a live estate that large to prove honestly, out of this phase's declared scope.",
+        f"**This is a {metrics['pipeline_count']:,}-object CONTROL-PLANE planning and scheduling "
+        "benchmark — it moves zero rows and zero bytes.** Never cite this as an "
+        f"\"{metrics['pipeline_count']:,}-object migration\"; see evaluation/data_plane_scale_test.py "
+        "for real rows/bytes moved and evaluation/load_test.py for concurrent operational load — "
+        "three distinct measurements (docs/EVALUATION.md), not one number.",
+        "",
+        f"Model calls: **{metrics['model_calls']}** ({metrics['model_calls_note']}).",
         "",
         "| Operation | Measure | Value |",
         "|---|---|---|",
         f"| Schema validation ({metrics['pipeline_count']} records) | p50 latency | {metrics['schema_validation']['p50_ms']} ms |",
         f"| Schema validation | p95 latency | {metrics['schema_validation']['p95_ms']} ms |",
         f"| Schema validation | total | {metrics['schema_validation']['total_ms']} ms |",
+        f"| Schema validation | throughput | {metrics['schema_validation']['throughput_per_sec']} records/sec |",
         f"| Wave Manager scheduling ({metrics['pipeline_count']} items, one pass) | total duration | {metrics['wave_scheduling']['total_duration_ms']} ms |",
         f"| Wave Manager scheduling | avg per item | {metrics['wave_scheduling']['avg_per_item_ms']} ms |",
+        f"| Wave Manager scheduling | throughput | {metrics['wave_scheduling']['throughput_per_sec']} items/sec |",
         f"| Wave Manager scheduling | admitted / held | {metrics['wave_scheduling']['admitted']} / {metrics['wave_scheduling']['held']} |",
         f"| Wave Manager scheduling | backlog-escalated | {metrics['wave_scheduling']['backlog_escalated']} |",
         f"| Policy decisions (real Firestore writes, sampled) | sample size | {metrics['policy_decisions']['sample_size']} |",
         f"| Policy decisions | p50 latency | {metrics['policy_decisions']['p50_ms']} ms |",
         f"| Policy decisions | p95 latency | {metrics['policy_decisions']['p95_ms']} ms |",
     ]
-    path = reports_dir / "scale_metrics.md"
+    path = reports_dir / f"scale_metrics_{metrics['pipeline_count']}.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Also keep the un-suffixed filename pointing at the latest run, for
+    # any tooling/link that expects a fixed path.
+    (reports_dir / "scale_metrics.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
     # The UI reads the structured durable measurement, not the presentation
     # file. The Markdown remains a portable review artifact only.
-    get_client().collection("evaluation_scale_reports").document("current").set(
-        {**metrics, "report_path": str(path.relative_to(REPO_ROOT)).replace("\\", "/")}
-    )
+    # Tier-keyed (Deploy & Harden Phase 4b) so a 1k/5k/20k run don't
+    # clobber each other — "current" stays as an alias to the latest.
+    record = {**metrics, "report_path": str(path.relative_to(REPO_ROOT)).replace("\\", "/")}
+    reports = get_client().collection("evaluation_scale_reports")
+    reports.document(str(metrics["pipeline_count"])).set(record)
+    reports.document("current").set(record)
     return path
+
+
+#: Deploy & Harden Phase 4 explicitly approved these three tiers, on top
+#: of the original 100-500 pattern-scale bound. Any other --count still
+#: gets a warning (not a refusal — this harness has no real GCP cost
+#: driver to protect against, see the module docstring), so a typo like
+#: --count=200000 doesn't silently run unnoticed.
+APPROVED_TIERS = {1_000, 5_000, 20_000}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--count", type=int, default=250, help="Number of synthetic pipeline defs (100-500 bound).")
+    parser.add_argument("--count", type=int, default=250, help="Number of synthetic pipeline defs.")
     args = parser.parse_args()
 
-    if not 100 <= args.count <= 500:
-        print(f"[scale-harness] WARNING: --count={args.count} is outside this phase's declared 100-500 bound.")
+    if not (100 <= args.count <= 500 or args.count in APPROVED_TIERS):
+        print(
+            f"[scale-harness] WARNING: --count={args.count} is outside the 100-500 pattern-scale "
+            f"bound and not one of the Deploy & Harden Phase 4 approved tiers {sorted(APPROVED_TIERS)}."
+        )
 
     print(f"[scale-harness] generating {args.count} synthetic pipeline definitions...")
     metrics = run_scale_demo(args.count)

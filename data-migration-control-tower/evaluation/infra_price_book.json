@@ -1,0 +1,40 @@
+{
+  "$comment": [
+    "Deploy & Harden Phase 4c. Separate from contracts/price_book.json on",
+    "purpose: that file prices MEASURED usage (tokens/bytes this system",
+    "actually recorded via tools/usage_meter.py). This file prices",
+    "infrastructure this project has NO usage-measurement instrumentation",
+    "for yet (Cloud Run CPU/memory-seconds, Cloud SQL instance-hours,",
+    "Firestore per-operation, Pub/Sub, network egress) — evaluation/",
+    "estimate_ladder_cost.py uses these as ASSUMPTIONS for a full-stack",
+    "estimate, not as a measurement. Every figure below is a published",
+    "list rate with a source; re-verify and bump effective_date before",
+    "trusting an estimate that used a stale one."
+  ],
+  "version": "2026-08-22",
+  "effective_date": "2026-08-22",
+  "currency": "USD",
+  "region": "us-central1",
+  "basis": "published list price, assumption-based (not measured)",
+  "sources": {
+    "cloud_run": "https://cloud.google.com/run/pricing",
+    "cloud_sql": "https://cloud.google.com/sql/pricing",
+    "firestore": "https://cloud.google.com/firestore/pricing",
+    "pubsub": "https://cloud.google.com/pubsub/pricing",
+    "network_egress": "https://cloud.google.com/vpc/network-pricing"
+  },
+  "rates": {
+    "cloud_run_cpu_second": { "unit": "per_vcpu_second", "price": 0.000024 },
+    "cloud_run_memory_gib_second": { "unit": "per_gib_second", "price": 0.0000025 },
+    "cloud_run_request": { "unit": "per_million_requests", "price": 0.40 },
+    "cloud_sql_db_f1_micro_hour": {
+      "$comment": "Shared-core, single-zone — the demo/staging profile infrastructure/terraform/cloud_sql.tf uses, not a production HA tier.",
+      "unit": "per_hour",
+      "price": 0.0150
+    },
+    "firestore_write": { "unit": "per_100k_operations", "price": 0.18 },
+    "firestore_read": { "unit": "per_100k_operations", "price": 0.06 },
+    "pubsub_throughput": { "unit": "per_gib", "price": 40.00 },
+    "network_egress_to_internet": { "unit": "per_gib", "price": 0.12 }
+  }
+}

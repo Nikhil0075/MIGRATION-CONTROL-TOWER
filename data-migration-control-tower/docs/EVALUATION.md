@@ -46,27 +46,46 @@ tier so the existing console wiring (`/api/v1/evaluations`) keeps working unmodi
 latency data), and an explicit `model_calls: 0 (control-plane-only)` note rather than silently
 implying model cost scales with `--count` — it doesn't, on purpose.
 
-## Data-plane scale (Phase 4, new)
+## Data-plane scale: `evaluation/data_plane_scale_test.py` (Phase 4, new)
 
-Measures actual rows/bytes moved through Phase 3's `CloudRunJobExecutor` against the Cloud SQL for
-PostgreSQL source — a genuinely different question from the control-plane harness, and reported
+Runs a real `tools/migration_executor.py::execute_migration()` and reports genuinely measured rows
+moved, duration, and throughput — not extrapolated, not simulated. Works against whichever
+`DataPlaneExecutor` is selected: today's default `InMemoryExecutor` (against whatever live source
+is actually reachable — WWI SQL Server in this dev environment), or Phase 3's `CloudRunJobExecutor`
+once `DATA_PLANE_EXECUTOR=cloud_run_job` and the Cloud SQL Postgres demo source are live. A
+genuinely different question from the control-plane harness (real rows/bytes vs. zero), reported
 separately rather than folded into one "scale" number.
 
-## Operational load (Phase 4, new)
+## Operational load: `evaluation/load_test.py` (Phase 4, new)
 
-Concurrent runs/users, Pub/Sub oldest-unacked-message age under load, and Cloud Run instance count
-as load increases — exercising Deploy & Harden Phase 2's distributed deployment, not meaningful
-against the single-process shape that predates it.
+Two parts: (1) real, runnable-today concurrent throughput — N simultaneous
+`tools/policy_engine.py::evaluate()` calls via a thread pool, measuring whether latency degrades
+under real Firestore contention; (2) a live query of whatever Cloud Run services/Pub-Sub
+subscriptions are actually deployed right now (honest about what's missing, the same pattern
+`evaluation/collect_deployment_evidence.py` uses — a service that doesn't exist is reported as
+such, not omitted). Live Cloud Run instance-count-under-load specifically needs Cloud Monitoring's
+`run.googleapis.com/container/instance_count` metric against a real traffic window once the full
+fleet is deployed — not fabricated here.
 
-## Cost estimation methodology (Phase 4)
+## Cost estimation methodology: `evaluation/estimate_ladder_cost.py` (Phase 4)
 
-Before running the 20k control-plane tier or the data-plane row/byte benchmark,
-`evaluation/estimate_ladder_cost.py` estimates the **full stack**, not just BigQuery bytes: BigQuery
-(via the dry-run flow in `tools/bigquery_tools.py`), Vertex AI tokens, Cloud Run + Cloud Run Jobs
-CPU/memory time, Cloud SQL uptime/storage/backups, Firestore operations, Pub/Sub, Cloud
-Logging/Trace, Cloud Storage, and network egress. The estimate is printed and requires explicit
-confirmation, checked against the actual verified remaining trial credit (`evaluation/reports/baseline_2026-08-21.md`),
-before either run proceeds — never auto-run from a script or CI job.
+Three separate scenarios (`--scenario control-plane|data-plane|operational-load`), because each has
+a genuinely different cost driver — folding them into one number would hide which dimension
+actually costs money:
+- **control-plane**: near-zero and CONSTANT across every tier (`evaluation/infra_price_book.json`'s
+  Firestore write rate × a fixed ~102 writes — the harness touches no BigQuery/Vertex AI at any
+  scale, confirmed by its own docstring, not assumed).
+- **data-plane**: extrapolated from a real measured sample (`--sample-run-id`, pulling actual
+  `bytes_billed`/`target_count` from `tools/usage_meter.py`'s recorded usage) using
+  `contracts/price_book.json`'s BigQuery rate, or an explicitly-labeled generic assumption when no
+  sample is given.
+- **operational-load**: `evaluation/infra_price_book.json`'s Cloud Run CPU/memory-second rates — no
+  usage-measurement instrumentation exists for this yet, so it's assumption-based and labeled as such.
+
+Every scenario prints its full breakdown and requires explicit confirmation (`--yes` to skip the
+interactive prompt for non-interactive use) before the plan's own condition — "checked against
+remaining trial credit, never auto-run" — is satisfied. The script never triggers a scale run
+itself; it only estimates and asks.
 
 ## What "evaluated" does not mean here
 
