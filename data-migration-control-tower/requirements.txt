@@ -24,6 +24,12 @@ google-cloud-bigquery==3.26.0
 # still runs — it falls back to the declared password_env and logs which path
 # answered rather than failing or silently pretending.
 google-cloud-secret-manager>=2.20.0
+# Cloud Billing Budget alerts (Deploy & Harden Phase 1d). Imported lazily
+# in infrastructure/setup_billing_budget.py, same Rung-2 pattern as the
+# secret-manager import above — a checkout without this package still
+# runs everything else; that one script prints a clear "pip install"
+# message instead of failing at import time.
+google-cloud-billing-budgets>=1.13
 
 # Agent framework and the supported unified Gemini SDK. Deterministic tools
 # remain callable when ADK is unavailable; model-required V2 stages fail

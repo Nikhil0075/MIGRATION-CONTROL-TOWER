@@ -24,7 +24,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools import registry  # noqa: E402
+from tools import policy_engine, registry  # noqa: E402
 
 
 def _firestore_reachable() -> bool:
@@ -57,8 +57,10 @@ def registered():
         registry.delete_card(agent_id, version)
 
 
-def _make_card(agent_id: str, capability: str, handler: str = "os:getcwd") -> dict:
-    return {
+def _make_card(
+    agent_id: str, capability: str, handler: str = "os:getcwd", permissions_key: str | None = None
+) -> dict:
+    card = {
         "agent_id": agent_id,
         "display_name": f"Test agent {agent_id}",
         "version": "1.0.0",
@@ -68,6 +70,9 @@ def _make_card(agent_id: str, capability: str, handler: str = "os:getcwd") -> di
         "runtime": {"type": "local"},
         "permissions": {},
     }
+    if permissions_key is not None:
+        card["permissions_key"] = permissions_key
+    return card
 
 
 @skip_if_no_firestore
@@ -141,7 +146,14 @@ def test_resolve_capability_handler_raises_when_nothing_matches():
 
 
 @skip_if_no_firestore
-def test_invoke_capability_dynamically_calls_the_handler(registered):
+def test_invoke_capability_dynamically_calls_the_handler(registered, monkeypatch):
+    # This test is about dynamic-import dispatch mechanics, not policy — the
+    # capability-dispatch gate (Deploy & Harden Phase 1a) is exercised by the
+    # dedicated tests below instead, so it's bypassed here rather than
+    # inventing a fake agent_permissions.yaml entry just to satisfy it.
+    monkeypatch.setattr(
+        policy_engine, "evaluate", lambda *a, **k: {"decision": policy_engine.DECISION_ALLOW}
+    )
     agent_id = f"test-agent-{uuid.uuid4().hex[:8]}"
     capability = f"test.invoke.{uuid.uuid4().hex[:8]}"
     registered(
@@ -154,6 +166,45 @@ def test_invoke_capability_dynamically_calls_the_handler(registered):
     assert result is True  # os.path.isdir(".") — the repo root, which exists
     assert resolved_agent_id == agent_id
     assert resolved_version == "1.0.0"
+
+
+# -- Capability-dispatch policy gate (Deploy & Harden Phase 1a, ADR 0001) ---
+
+
+@skip_if_no_firestore
+def test_invoke_capability_denies_when_capability_not_in_permissions_key_allowlist(registered):
+    # permissions_key="discovery" is real, but this randomized capability
+    # string is not in discovery's allowed_tools — the gate must deny
+    # before the handler (which would otherwise happily run os.getcwd())
+    # is ever called.
+    agent_id = f"test-agent-{uuid.uuid4().hex[:8]}"
+    capability = f"test.ungranted.{uuid.uuid4().hex[:8]}"
+    registered(
+        _make_card(agent_id, capability, permissions_key="discovery"),
+        published_by="pub@example.internal",
+    )
+    registry.approve(agent_id, "1.0.0", approved_by="governance@example.internal")
+
+    with pytest.raises(registry.CapabilityDenied):
+        registry.invoke_capability(capability)
+
+
+@skip_if_no_firestore
+def test_invoke_capability_denies_when_permissions_key_missing():
+    # A card with no permissions_key at all (the bug this phase fixed for
+    # infrastructure/seed_finance_agent.py — see docs/adr/0001) must deny,
+    # not silently proceed as if unrestricted.
+    agent_id = f"test-agent-{uuid.uuid4().hex[:8]}"
+    capability = f"test.no.perms.key.{uuid.uuid4().hex[:8]}"
+    registry.publish(
+        _make_card(agent_id, capability), published_by="pub@example.internal"
+    )
+    try:
+        registry.approve(agent_id, "1.0.0", approved_by="governance@example.internal")
+        with pytest.raises(registry.CapabilityDenied):
+            registry.invoke_capability(capability)
+    finally:
+        registry.delete_card(agent_id, "1.0.0")
 
 
 @skip_if_no_firestore

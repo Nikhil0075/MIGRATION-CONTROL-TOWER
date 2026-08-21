@@ -84,10 +84,13 @@ def test_migration_requested_uses_canonical_binding_and_estate_discovery(monkeyp
         assert run["estate_id"] == "estate-one"
         assert run["source_id"] == "primary-sql"
         assert run["pack_id"] == "wwi_sqlserver_v1"
+        # run_id is now threaded through to discovery (Deploy & Harden
+        # Phase 1b) so its tool-level policy checks can be scoped/audited
+        # against the run, not just the capability-dispatch gate.
         assert invoked == [(
             orchestrator.DISCOVERY_CAPABILITY,
             (),
-            {"estate_id": "estate-one"},
+            {"estate_id": "estate-one", "run_id": result["run_id"]},
         )]
         assert published == [("discovery.completed", {"run_id": result["run_id"]})]
     finally:

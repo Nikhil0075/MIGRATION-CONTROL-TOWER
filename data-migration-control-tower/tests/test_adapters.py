@@ -149,6 +149,13 @@ def test_dag_artifact_adapter_matches_source_catalog_directly():
 def test_registered_estate_discovery_builds_every_declared_binding(monkeypatch):
     from agents.discovery import agent as discovery
 
+    # This test is about binding/adapter-construction mechanics, not policy
+    # — tools/policy_engine.py::authorize() (Deploy & Harden Phase 1b) is
+    # exercised by tests/test_policy_engine.py instead, so it's bypassed
+    # here rather than adding an implicit live-Firestore dependency to a
+    # test that otherwise runs entirely on fakes.
+    monkeypatch.setattr(discovery, "authorize", lambda ctx: {"decision": "ALLOW"})
+
     estate = {
         "estate_id": "registered-estate",
         "sources": [

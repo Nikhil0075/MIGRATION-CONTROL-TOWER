@@ -58,6 +58,24 @@ class NoApprovedProvider(LookupError):
     """
 
 
+class CapabilityDenied(PermissionError):
+    """Raised by invoke_capability() when the resolved card's
+    permissions_key fails the capability-dispatch policy gate (Deploy &
+    Harden Phase 1a, ADR 0001) — "is this agent allowed to be invoked for
+    this capability at all." This is deliberately coarse: it does not
+    authorize whatever the handler does once it's running — see
+    tools/policy_engine.py::authorize() for the tool-level layer that
+    covers that. Carries the PolicyDecision record for callers that want
+    the reason, not just the fact of denial."""
+
+    def __init__(self, record: dict):
+        self.record = record
+        super().__init__(
+            f"capability dispatch {record.get('decision')} for "
+            f"{record.get('agent_id')} (capability={record.get('tool_name')}): {record.get('reason')}"
+        )
+
+
 def _now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
@@ -210,8 +228,43 @@ def invoke_capability(capability: str, *args, **kwargs):
     """Resolves capability -> APPROVED card -> dynamically imports and
     calls its handler. Returns (result, agent_id, version) so the caller
     can pin the resolved version into the run record (§20.4).
+
+    Capability-dispatch policy gate (Deploy & Harden Phase 1a, ADR 0001):
+    before calling the handler, checks whether the resolved card's
+    `permissions_key` is authorized to be invoked for this capability at
+    all. This is the OUTER, coarse layer only — it does not authorize
+    whatever the handler goes on to do internally (adapter reads,
+    Firestore writes, BigQuery access); those call
+    tools/policy_engine.py::authorize() independently, with their own
+    real resource_class, at the point they happen. See
+    docs/GOVERNANCE.md for the full two-layer model.
+
+    `run_id` is extracted best-effort for the audit record (evaluate()
+    tolerates run_id=None) — from an explicit `run_id` kwarg first, else
+    the first positional string arg. This is deliberately NOT trusted for
+    anything beyond audit-trail attribution: unlike the tool-level layer
+    (tools/invocation_context.py), a wrong guess here only means a policy
+    decision gets recorded against the wrong run_id, not a wrong
+    authorization outcome — the ALLOW/DENY decision itself never depends
+    on run_id.
     """
+    from tools import policy_engine
+
     card = resolve_capability_handler(capability)
+    run_id = kwargs.get("run_id")
+    if run_id is None and args and isinstance(args[0], str):
+        run_id = args[0]
+
+    decision = policy_engine.evaluate(
+        card.get("permissions_key"),
+        f"capability:{capability}",
+        "METADATA",
+        run_id,
+        tool_name=capability,
+    )
+    if decision["decision"] != policy_engine.DECISION_ALLOW:
+        raise CapabilityDenied(decision)
+
     module_path, func_name = card["handler"].split(":")
     module = importlib.import_module(module_path)
     handler = getattr(module, func_name)

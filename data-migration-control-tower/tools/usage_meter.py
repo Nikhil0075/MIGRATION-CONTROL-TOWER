@@ -172,6 +172,87 @@ def _write(run_id: str | None, event: dict) -> dict | None:
     return record
 
 
+class RunBudgetExceeded(RuntimeError):
+    """Raised by reserve_bigquery_budget() when a run's cumulative BigQuery
+    byte reservation would exceed its cap (Deploy & Harden Phase 1c).
+
+    Carries the numbers so a caller can report exactly what was reserved,
+    requested, and capped at — not just "budget exceeded"."""
+
+    def __init__(self, run_id: str, reserved_bytes: int, requested_bytes: int, cap_bytes: int):
+        self.run_id = run_id
+        self.reserved_bytes = reserved_bytes
+        self.requested_bytes = requested_bytes
+        self.cap_bytes = cap_bytes
+        super().__init__(
+            f"run {run_id!r} has reserved {reserved_bytes:,} bytes; reserving "
+            f"{requested_bytes:,} more would exceed the {cap_bytes:,}-byte per-run cap"
+        )
+
+
+#: migration_runs/{run_id}/budget/bigquery — a single counter document,
+#: separate from the usage_events log. Summing usage_events inside a
+#: transaction would mean reading every event doc on every query just to
+#: check a running total; a dedicated counter is the standard Firestore
+#: pattern for "how much has this run reserved so far," updated
+#: atomically via a transaction rather than a bare increment so the
+#: read-check-write is not racy across concurrent queries on the same run.
+_BUDGET_DOC = "bigquery"
+
+
+def reserve_bigquery_budget(run_id: str | None, estimated_bytes: int, cap_bytes: int) -> int:
+    """Atomically reserves `estimated_bytes` against run_id's cumulative
+    BigQuery byte cap, or raises RunBudgetExceeded without reserving
+    anything.
+
+    This is a SOFT, best-effort control (Deploy & Harden Phase 1c, plan
+    point 4): the transaction prevents two concurrent queries on the SAME
+    run from both reading a running total that individually looks fine
+    but jointly overshoots, but it cannot prevent overshoot across
+    processes with no shared transaction, and it says nothing about
+    spend outside this run. The real backstop is the Cloud Billing
+    Budget (infrastructure/setup_billing_budget.py) — this exists to
+    catch a runaway query loop early and cheaply, not to guarantee a
+    hard ceiling.
+
+    run_id=None (unattributed/ad hoc usage — tools/usage_meter.py's
+    `current_run_id()` contract) skips reservation entirely; the caller
+    still applies the flat per-query cap independently.
+
+    Returns the new reserved total on success.
+    """
+    if not run_id:
+        return 0
+
+    from google.cloud import firestore as gcp_firestore
+
+    from tools.firestore_client import get_client
+
+    doc_ref = (
+        get_client()
+        .collection("migration_runs")
+        .document(run_id)
+        .collection("budget")
+        .document(_BUDGET_DOC)
+    )
+
+    @gcp_firestore.transactional
+    def _reserve(transaction) -> int:
+        snapshot = doc_ref.get(transaction=transaction)
+        reserved = int((snapshot.to_dict() or {}).get("reserved_bytes", 0)) if snapshot.exists else 0
+        if reserved + estimated_bytes > cap_bytes:
+            raise RunBudgetExceeded(run_id, reserved, estimated_bytes, cap_bytes)
+        new_total = reserved + estimated_bytes
+        transaction.set(
+            doc_ref,
+            {"reserved_bytes": new_total, "cap_bytes": cap_bytes, "updated_at": _now()},
+            merge=True,
+        )
+        return new_total
+
+    return _reserve(get_client().transaction())
+
+
 def price_usage(events: list[dict], price_book: dict | None = None) -> dict:
     """Prices measured usage, and says what it could not price.
 

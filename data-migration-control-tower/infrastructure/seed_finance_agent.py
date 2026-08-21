@@ -47,6 +47,13 @@ CARD = {
     },
     "capabilities": ["impact.assessment.finance_reporting"],
     "handler": "agents.finance.impact_agent:assess_impact",
+    # Deploy & Harden Phase 1a: tools/registry.py::invoke_capability()'s
+    # capability-dispatch gate looks this up in policies/agent_permissions.yaml.
+    # Without it, evaluate() sees agent_key=None -> "no policy declared" ->
+    # DENY, which would silently break the cross-department finance check
+    # the moment universal capability-gate enforcement went live (see
+    # docs/adr/0001-two-layer-policy-enforcement.md).
+    "permissions_key": "finance",
     "runtime": {"type": "local", "service_account": "sa-finance-impact"},
     "model": {
         "provider": "vertex-ai",
@@ -55,8 +62,12 @@ CARD = {
         "prompt_version": "1.0",
         "output_schema_version": "1.0",
     },
+    # Informational snapshot only — tools/policy_engine.py reads
+    # policies/agent_permissions.yaml's "finance" block at evaluation
+    # time, not this field. Kept identical to that block so the registry
+    # card doesn't display a permission set that isn't what's enforced.
     "permissions": {
-        "allowed_tools": ["lineage.graph.read"],
+        "allowed_tools": ["capability:impact.assessment.finance_reporting", "lineage.graph.read"],
         "denied_tools": ["source.raw_pii_read", "target.write", "production.write"],
         "data_classes": ["METADATA"],
     },

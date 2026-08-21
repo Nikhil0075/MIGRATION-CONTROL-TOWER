@@ -728,14 +728,18 @@ anywhere. Closed out with:
   `--delete-firestore` exists but requires typing the project ID back
   as confirmation.
 - **`scripts/clean_clone_check.sh`** (the audit's "clean-clone release
-  gate" finding) — this repo isn't under git version control in this
-  environment, so a literal `git clone` isn't available; instead it
-  copies the working tree (excluding `.venv`, caches, and `.env`) into
-  an isolated temp directory and proves it from scratch: a fresh venv,
-  `pip install -r requirements.txt`, and full `pytest --collect-only`
-  (every import resolves, no live services needed). **Run live**: 198
-  tests collected cleanly in a brand-new venv with no prior install and
-  no `.env` present.
+  gate" finding) — this repo is under git version control with a real
+  GitHub remote (`github.com/Nikhil0075/MIGRATION-CONTROL-TOWER`); the
+  script still copies the working tree into an isolated temp directory
+  rather than doing a literal `git clone` (deliberately excluding
+  `.venv`, caches, `.env`, and `.git` itself — the same set a real clone
+  would exclude via `.gitignore`), then proves it from scratch there: a
+  fresh venv, `pip install -r requirements.txt`, and full
+  `pytest --collect-only` (every import resolves, no live services
+  needed). Test-collection counts here go stale quickly as the suite
+  grows — see a dated `evaluation/reports/` snapshot (e.g.
+  `baseline_2026-08-21.md`) for the count as of a specific run, rather
+  than trusting a number fixed in this prose.
 - **`docs/compliance_matrix.md`** — the master doc's §26 concept, filled
   in with what was actually built rather than left as a template:
   every §26.1/§26.2 requirement, §32's portability/scale claims scoped
@@ -848,8 +852,12 @@ confirmed real:
 **Evidence**: 6 new regression tests in `tests/test_orchestrator.py` —
 2 unit tests proving `_consume()` acks only on handler success and
 nacks (never acks) on a handler exception; 4 live-Firestore tests
-proving `_dedup_claim()`'s claimed/done/stale_claim states. Full suite at the time:
-**224/224 passing** (491 as of Day 11). A live `run_full_migration.py` run against real
+proving `_dedup_claim()`'s claimed/done/stale_claim states. Full suite at
+the time of this fix: **224/224 passing** (491 as of Day 11) — both
+numbers are historical; the suite has grown substantially since (see a
+dated `evaluation/reports/` snapshot, e.g. `baseline_2026-08-21.md`, for
+the current count — don't treat either figure above as current). A live
+`run_full_migration.py` run against real
 Pub/Sub/Firestore/SQL Server/BigQuery reached `COMPLETE` with every
 `processed_messages` doc from that run's chain at `status="done"` (none
 stuck `"claimed"`) and its wave slot cleanly released (that document became
@@ -946,9 +954,14 @@ single `if source ==` inside an agent; that grep can.
 make test
 ```
 
-491 backend tests, plus 21 component tests and 19 browser tests under
-`frontend/client` (`npm test`, `npm run test:e2e`). They run against live
-Firestore, so a test that creates a run or a registry card must delete it in
+The full backend suite plus the frontend's component and browser tests
+under `frontend/client` (`npm test`, `npm run test:e2e`) — see a dated
+`evaluation/reports/` snapshot (e.g. `baseline_2026-08-21.md`) for the
+exact counts as of a specific point in time rather than a number fixed
+here, which reliably goes stale as the suite grows (this line has
+already been wrong once — see `docs/adr/`'s note on the "224/224"/"491"
+figures that outlived their accuracy). They run against live Firestore,
+so a test that creates a run or a registry card must delete it in
 teardown; suites needing SQL Server, Postgres or BigQuery skip automatically
 when those are unreachable.
 
@@ -961,8 +974,10 @@ with zero edits under `agents/`.
 
 ## Repository layout
 
-See `docs/architecture.md` (added as the fleet grows) and the inline
-READMEs under `agents/`, `tools/`, `simulator/`, and `infrastructure/`.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/GOVERNANCE.md](docs/GOVERNANCE.md),
+[docs/DURABILITY.md](docs/DURABILITY.md), and [docs/EVALUATION.md](docs/EVALUATION.md) for the
+system design, plus the inline READMEs under `agents/`, `tools/`, `simulator/`, and
+`infrastructure/`.
 
 ## Data sources & attribution
 

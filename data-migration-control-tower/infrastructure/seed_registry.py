@@ -114,6 +114,18 @@ def main() -> None:
             "owner": OWNER,
             "capabilities": spec["capabilities"],
             "handler": spec["handler"],
+            # Deploy & Harden Phase 1a (docs/adr/0001-two-layer-policy-enforcement.md):
+            # tools/registry.py::invoke_capability()'s capability-dispatch
+            # gate reads this field directly off the resolved card. Before
+            # this fix it was used only to build the SA name and look up
+            # `permissions` below — never actually persisted onto the card
+            # itself, so every real invoke_capability() call would have hit
+            # "no policy declared for agent_key=None" the moment the gate
+            # went live, for every one of these six agents, not only the
+            # already-known finance-agent gap. Found by a live-Firestore
+            # test failure (tests/test_evaluation_harness.py) after
+            # re-seeding, not assumed.
+            "permissions_key": spec["permissions_key"],
             "runtime": {"type": "local", "service_account": f"sa-{spec['permissions_key']}"},
             "model_required": bool(spec.get("model_required")),
             "permissions": permissions,

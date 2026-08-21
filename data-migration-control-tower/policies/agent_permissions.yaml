@@ -1,10 +1,13 @@
 # Ceiling permissions per agent identity, per master doc §4.2 and §20.1.
 #
-# Day 1-2 status: this file is DECLARED but not yet enforced by a policy
-# decision point in the tool-call path (that lands with the Risk agent
-# and the deterministic policy engine on Tue 18 Aug, per §17.1). Today it
-# documents the intended boundary so Discovery is built against it from
-# the start.
+# Enforced at two layers (Deploy & Harden Phase 1, docs/adr/0001-two-layer-
+# policy-enforcement.md): tools/registry.py::invoke_capability() checks
+# each agent's "capability:<capability-string>" entry below before a
+# handler runs at all (coarse — "is this agent allowed to be invoked for
+# this capability"); tools/policy_engine.py::authorize() checks the
+# finer-grained action entries (source.catalog.sql_server etc.)
+# independently, at the point each sensitive tool call actually happens,
+# with its own real resource_class. See docs/GOVERNANCE.md.
 #
 # data_classes: METADATA | MASKED | PII | PRODUCTION
 # decision:     ALLOW | DENY | REQUIRE_APPROVAL
@@ -18,9 +21,11 @@ orchestrator:
 
 discovery:
   allowed_tools:
+    - capability:discovery.catalog.estate
     - source.catalog.sql_server
     - source.catalog.oracle_corpus
     - source.catalog.dag_artifacts
+    - source.catalog.registered_estate   # tools/adapters/ generic estate-binding discovery path
     - firestore.write_catalog
   denied_tools:
     - source.raw_pii_read
@@ -31,6 +36,7 @@ discovery:
 
 lineage:
   allowed_tools:
+    - capability:lineage.graph.build
     - source.catalog.read   # metadata + code read only
     - lineage.graph.write
   denied_tools:
@@ -42,6 +48,7 @@ lineage:
 
 risk:
   allowed_tools:
+    - capability:risk.assess.estate
     - source.sample.masked
     - schema.metadata.read
     - policy.catalog.read
@@ -54,6 +61,7 @@ risk:
 
 planner:
   allowed_tools:
+    - capability:planner.plan.propose
     - schema.metadata.read
     - sql.translate
     - plan.write
@@ -64,6 +72,7 @@ planner:
 
 validation:
   allowed_tools:
+    - capability:validation.reconcile.source_target
     - source.query.masked
     - target.query.masked
     - hash.compute
@@ -75,6 +84,7 @@ validation:
 
 cutover:
   allowed_tools:
+    - capability:cutover.request_approval
     - migration.execute.approved
     - cutover.execute.approved
   denied_tools:
@@ -83,3 +93,20 @@ cutover:
   approval_required_actions:
     - production.write
     - cutover.execute.approved
+
+finance:
+  # Cross-department cataloging demo (master doc §26.2's "Cross-department
+  # cataloging" row): infrastructure/seed_finance_agent.py's card carries
+  # this same shape inline as card["permissions"] today, unused by
+  # anything at runtime — this block is the one tools/policy_engine.py
+  # actually reads. Kept in sync manually; drift here is a real bug (see
+  # docs/adr/0001, "the finance-impact gap this surfaces").
+  allowed_tools:
+    - capability:impact.assessment.finance_reporting
+    - lineage.graph.read
+  denied_tools:
+    - source.raw_pii_read
+    - target.write
+    - production.write
+  data_classes:
+    - METADATA

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Clean-clone release gate (Day 10 hardening, Phase 6 — the audit's
-# "clean-clone release gate" finding). This repo isn't under git version
-# control in this environment, so a literal `git clone` isn't available
-# — instead this copies the working tree (excluding .venv, __pycache__,
-# .pytest_cache, and .env, the same set a .gitignore'd clone would
-# exclude) into a fresh temp directory and proves the codebase is
-# structurally sound in total isolation from wherever it's normally run:
+# "clean-clone release gate" finding). This repo IS under git version
+# control with a real GitHub remote
+# (github.com/Nikhil0075/MIGRATION-CONTROL-TOWER) — this still copies the
+# working tree rather than doing a literal `git clone` (excluding .venv,
+# __pycache__, .pytest_cache, .env, and .git itself, the same set a
+# .gitignore'd clone would exclude) into a fresh temp directory and
+# proves the codebase is structurally sound in total isolation from
+# wherever it's normally run:
 #   1. requirements.txt installs cleanly into a brand-new venv
 #   2. pytest can COLLECT every test (imports resolve, no syntax errors)
 #      without needing any live service — the fast, no-infra half of

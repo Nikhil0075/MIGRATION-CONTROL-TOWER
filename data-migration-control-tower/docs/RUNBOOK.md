@@ -308,8 +308,11 @@ gcloud pubsub subscriptions pull dead-letter-sub --limit=10 --format=json
 ```
 
 Each message carries a `CloudPubSubDeadLetterSourceSubscription`
-attribute naming which consumer gave up on it. The console has no
-dead-letter view — this is the only place to look.
+attribute naming which consumer gave up on it. The console also has a
+dead-letter view (`GET /api/v1/dead-letters`, `frontend/api_v1.py`) that
+surfaces the same messages with replay/discard actions — use the `gcloud`
+command above when you need the raw Pub/Sub-level detail (attributes,
+delivery count) the console screen doesn't show.
 
 **403 on every page.** Your account holds no role. See A1.
 

@@ -33,10 +33,14 @@ import hashlib
 import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
 from tools.firestore_client import get_client
+
+if TYPE_CHECKING:
+    from tools.invocation_context import InvocationContext
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PERMISSIONS_PATH = REPO_ROOT / "policies" / "agent_permissions.yaml"
@@ -44,6 +48,20 @@ PERMISSIONS_PATH = REPO_ROOT / "policies" / "agent_permissions.yaml"
 DECISION_ALLOW = "ALLOW"
 DECISION_DENY = "DENY"
 DECISION_REQUIRE_APPROVAL = "REQUIRE_APPROVAL"
+
+
+class PolicyDenied(PermissionError):
+    """Raised by authorize() when a tool-level call is DENY/REQUIRE_APPROVAL,
+    or when it's missing a resource_class entirely (fail-closed — see
+    authorize()'s docstring). Carries the full PolicyDecision record so
+    callers can log/display the reason, not just "denied"."""
+
+    def __init__(self, record: dict):
+        self.record = record
+        super().__init__(
+            f"policy {record.get('decision')} for {record.get('agent_id')}."
+            f"{record.get('action')} ({record.get('reason')})"
+        )
 
 
 @lru_cache(maxsize=1)
@@ -67,18 +85,22 @@ def evaluate(
     (e.g. "discovery", "risk", "cutover") — the registry-resolved short
     name, not the AGENT_ID display string (master doc §20's agent_id is
     the display/registry identity; this is the ceiling-permission lookup
-    key until the registry itself is built in Block C).
+    key until the registry itself is built in Block C). agent_key may be
+    None (e.g. a registry card with no permissions_key declared, Deploy &
+    Harden Phase 1a) — that denies rather than raising, since a missing
+    identity must fail closed, not crash past the check.
     """
     permissions = _load_permissions()
-    agent_policy = permissions.get(agent_key)
+    agent_policy = permissions.get(agent_key) if agent_key else None
     if agent_policy is None:
         decision, reason = DECISION_DENY, f"no policy declared for agent_key={agent_key!r}"
     else:
         decision, reason = _decide(agent_policy, action, resource_class)
 
     evidence_basis = f"{agent_key}|{action}|{resource_class}|{run_id or ''}|{decision}|{reason}"
+    agent_key_label = agent_key or "UNKNOWN"
     record = {
-        "policy_id": f"POL-{action.upper()}-{agent_key.upper()}",
+        "policy_id": f"POL-{action.upper()}-{agent_key_label.upper()}",
         "agent_id": agent_key,
         "action": action,
         "tool_name": tool_name or action,
@@ -135,3 +157,58 @@ def _record_decision(record: dict) -> str:
     doc_ref = collection.document(str(uuid.uuid4()))
     doc_ref.set(record)
     return doc_ref.path
+
+
+def authorize(ctx: "InvocationContext") -> dict:
+    """Tool-level policy checkpoint (Deploy & Harden Phase 1b, ADR 0001).
+
+    This is the second, finer-grained layer alongside
+    `tools/registry.py::invoke_capability()`'s coarse capability-dispatch
+    gate. Call this immediately before any sensitive tool operation
+    (adapter read/write, BigQuery access, secret access) — not only at
+    the moment an agent capability starts.
+
+    Fails closed: an InvocationContext with no resource_class is refused
+    here, before evaluate() ever runs, rather than silently inheriting
+    the capability gate's METADATA default. A masked-row read, a
+    production write, or an approval-protected operation must state its
+    real classification explicitly — "I forgot to classify this" and "I
+    classified this as METADATA" must never look the same to the policy
+    engine.
+
+    Raises PolicyDenied (never returns) on anything other than ALLOW —
+    callers that need to react to REQUIRE_APPROVAL specifically (Cutover
+    already has its own human-approval flow via tools/approval_service.py)
+    should catch PolicyDenied and inspect `.record["decision"]`.
+    """
+    if not ctx.resource_class:
+        record = {
+            "policy_id": f"POL-{ctx.action.upper()}-{ctx.agent_id.upper()}",
+            "agent_id": ctx.agent_id,
+            "action": ctx.action,
+            "tool_name": ctx.tool_name or ctx.action,
+            "resource_class": None,
+            "decision": DECISION_DENY,
+            "approval_required": False,
+            "run_id": ctx.run_id,
+            "reason": "no resource_class supplied — fail closed rather than default to METADATA",
+            "trace_id": ctx.trace_id,
+            "evidence_hash": hashlib.sha256(
+                f"{ctx.agent_id}|{ctx.action}|MISSING_RESOURCE_CLASS|{ctx.run_id or ''}".encode()
+            ).hexdigest(),
+            "decided_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }
+        _record_decision(record)
+        raise PolicyDenied(record)
+
+    record = evaluate(
+        ctx.agent_id,
+        ctx.action,
+        ctx.resource_class,
+        ctx.run_id,
+        tool_name=ctx.tool_name,
+        trace_id=ctx.trace_id,
+    )
+    if record["decision"] != DECISION_ALLOW:
+        raise PolicyDenied(record)
+    return record

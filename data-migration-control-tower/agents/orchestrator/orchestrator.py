@@ -327,14 +327,18 @@ def handle_migration_requested(payload: dict) -> dict:
 
     with tracing.span("handle_migration_requested", run_id=run_id, pipeline_id=pipeline_id):
         if estate_id:
+            # run_id is passed through so discover_estate() can authorize
+            # each individual source read (tools/policy_engine.py::authorize(),
+            # Deploy & Harden Phase 1b) against the run it belongs to, not
+            # only gate the capability dispatch itself.
             (table_records, pipeline_records), agent_id, version = registry.invoke_capability(
-                DISCOVERY_CAPABILITY, estate_id=estate_id
+                DISCOVERY_CAPABILITY, estate_id=estate_id, run_id=run_id
             )
         else:
             # Compatibility path for events created before estate_id became
             # canonical. New API requests never use fixed corpus paths.
             (table_records, pipeline_records), agent_id, version = registry.invoke_capability(
-                DISCOVERY_CAPABILITY, ORACLE_CORPUS_PATH, DAG_ARTIFACTS_PATH
+                DISCOVERY_CAPABILITY, ORACLE_CORPUS_PATH, DAG_ARTIFACTS_PATH, run_id=run_id
             )
         pin_agent_version(run_id, agent_id, version)
         logger.info("resolved %s (capability=%s) -> v%s", agent_id, DISCOVERY_CAPABILITY, version)

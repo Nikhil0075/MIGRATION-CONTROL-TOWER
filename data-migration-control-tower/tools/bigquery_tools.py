@@ -13,7 +13,34 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
+from google.api_core.exceptions import Forbidden
 from google.cloud import bigquery
+
+#: Deploy & Harden Phase 1c: hard per-query cap. 1 GiB is generous for
+#: this project's row-count/null-count/sum/key-hash reconciliation
+#: queries (small tables, aggregate scans) while still catching a query
+#: that accidentally scans something far larger than intended. Override
+#: per-environment via env, not by editing code.
+DEFAULT_BQ_MAX_BYTES_BILLED_PER_QUERY = 1 * 1024**3
+
+#: Soft, best-effort cumulative cap per run — see
+#: tools/usage_meter.py::reserve_bigquery_budget()'s docstring for why
+#: this is a defense-in-depth control, not the real backstop.
+DEFAULT_BQ_MAX_BYTES_BILLED_PER_RUN = 10 * 1024**3
+
+#: Dry-run estimates are usually exact (BigQuery computes the same query
+#: plan), but a small margin absorbs metadata/rounding differences
+#: between the dry-run estimate and the real job's final accounting.
+_ESTIMATE_MARGIN_FRACTION = 0.10
+_ESTIMATE_MARGIN_FLOOR_BYTES = 10 * 1024**2  # BigQuery's own 10 MB minimum-billing granularity
+
+
+class QueryBudgetExceeded(RuntimeError):
+    """Raised when a query's dry-run estimate exceeds the per-query cap,
+    or (via usage_meter.RunBudgetExceeded, re-raised here with `purpose`
+    attached) the run's cumulative cap. Distinct from BigQuery's own
+    Forbidden/BadRequest so callers can catch a budget refusal
+    specifically rather than any API error."""
 
 
 @lru_cache(maxsize=1)
@@ -24,6 +51,29 @@ def get_client() -> bigquery.Client:
 
 def _dataset(dataset: str | None = None) -> str:
     return dataset or os.environ.get("BQ_DATASET", "migration_target")
+
+
+def _max_bytes_billed_per_query() -> int:
+    try:
+        return int(os.environ.get("BQ_MAX_BYTES_BILLED_PER_QUERY", DEFAULT_BQ_MAX_BYTES_BILLED_PER_QUERY))
+    except ValueError:
+        return DEFAULT_BQ_MAX_BYTES_BILLED_PER_QUERY
+
+
+def _max_bytes_billed_per_run() -> int:
+    try:
+        return int(os.environ.get("BQ_MAX_BYTES_BILLED_PER_RUN", DEFAULT_BQ_MAX_BYTES_BILLED_PER_RUN))
+    except ValueError:
+        return DEFAULT_BQ_MAX_BYTES_BILLED_PER_RUN
+
+
+def _estimate_query_bytes(query: str) -> int:
+    """A dry run costs nothing and executes nothing — BigQuery validates
+    the query and returns its planned bytes-processed without running it,
+    which is what makes "check before you spend" possible at all."""
+    job_config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+    job = get_client().query(query, job_config=job_config)
+    return int(job.total_bytes_processed or 0)
 
 
 def load_json_rows(
@@ -83,20 +133,59 @@ def _metered_query(query: str, *, purpose: str):
     """Runs a query and records what BigQuery says it billed.
 
     One helper rather than five instrumented call sites, so a query added
-    later is metered by construction instead of by remembering. The job
-    object carries the figures; nothing here estimates them.
+    later is metered — and cost-controlled — by construction instead of
+    by remembering. The job object carries the actual figures recorded
+    afterward; nothing here estimates the FINAL cost. The dry-run
+    estimate below exists only to decide, before spending anything,
+    whether this query is allowed to run at all (Deploy & Harden
+    Phase 1c, dry-run -> reserve -> cap):
 
-    `total_bytes_billed`, not `total_bytes_processed`: BigQuery bills a
-    10 MB minimum per query, so this project's many tiny reconciliation
-    counts cost far more than the bytes they touch. Both are recorded,
-    because the gap between them is the interesting part.
+      1. Dry-run the query (free, doesn't execute) to estimate its bytes.
+      2. Reserve that estimate against the run's cumulative soft budget
+         (tools/usage_meter.py::reserve_bigquery_budget) — refuses before
+         any real query runs if the run's already near its cap.
+      3. Run the real query with `maximum_bytes_billed` set from the
+         estimate (BigQuery itself refuses to run past that, as a hard
+         per-query backstop independent of step 2's soft, run-scoped one).
+
+    `total_bytes_billed`, not `total_bytes_processed`, is what's recorded
+    afterward: BigQuery bills a 10 MB minimum per query, so this
+    project's many tiny reconciliation counts cost far more than the
+    bytes they touch. Both are recorded, because the gap between them is
+    itself the interesting part.
     """
-    from tools.usage_meter import current_run_id, record_bigquery_usage
+    from tools.usage_meter import RunBudgetExceeded, current_run_id, record_bigquery_usage, reserve_bigquery_budget
 
-    job = get_client().query(query)
-    result = job.result()  # wait, so the job carries its final statistics
+    run_id = current_run_id()
+    per_query_cap = _max_bytes_billed_per_query()
+
+    estimated_bytes = _estimate_query_bytes(query)
+    if estimated_bytes > per_query_cap:
+        raise QueryBudgetExceeded(
+            f"{purpose}: dry-run estimate {estimated_bytes:,} bytes exceeds the "
+            f"{per_query_cap:,}-byte per-query cap (BQ_MAX_BYTES_BILLED_PER_QUERY) — refused "
+            f"before running, not after."
+        )
+
+    if run_id:
+        try:
+            reserve_bigquery_budget(run_id, estimated_bytes, _max_bytes_billed_per_run())
+        except RunBudgetExceeded as exc:
+            raise QueryBudgetExceeded(f"{purpose}: {exc}") from exc
+
+    margin = max(int(estimated_bytes * _ESTIMATE_MARGIN_FRACTION), _ESTIMATE_MARGIN_FLOOR_BYTES)
+    job_config = bigquery.QueryJobConfig(maximum_bytes_billed=min(estimated_bytes + margin, per_query_cap))
+    try:
+        job = get_client().query(query, job_config=job_config)
+        result = job.result()  # wait, so the job carries its final statistics
+    except Forbidden as exc:
+        raise QueryBudgetExceeded(
+            f"{purpose}: BigQuery refused to run past its own maximum_bytes_billed cap "
+            f"({job_config.maximum_bytes_billed:,} bytes) — the dry-run estimate undershot the "
+            f"actual cost. Original error: {exc}"
+        ) from exc
     record_bigquery_usage(
-        current_run_id(),
+        run_id,
         job_kind="query",
         bytes_billed=getattr(job, "total_bytes_billed", None),
         bytes_processed=getattr(job, "total_bytes_processed", None),

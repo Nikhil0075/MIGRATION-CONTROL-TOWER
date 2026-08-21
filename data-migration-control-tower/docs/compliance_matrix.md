@@ -42,10 +42,10 @@ here for completeness, honestly marked not-yet-done.
 | Category selected: Fortified Enterprise Fleet | not yet declared |
 | Hosted project URL | ⚠️ production Oracle JET Redwood UI and multi-stage Cloud Run image are implemented and locally browser-verified; a public deployment URL has not been created in this workspace |
 | Text descriptions (features, technologies, data sources, findings) | ❌ not drafted — this matrix and `evaluation/reports/` are the real-output source they'd be drawn from |
-| Public repository URL | not yet applicable — not under git version control in this environment |
+| Public repository URL | ⚠️ `github.com/Nikhil0075/MIGRATION-CONTROL-TOWER` exists with real commit history; not yet confirmed public/judge-accessible |
 | README spin-up instructions, verified from a clean clone | ✅ `scripts/clean_clone_check.sh` (Day 10 Phase 6) — fresh venv + `pip install -r requirements.txt` + full test collection, verified live in an isolated copy with no `.env` |
-| Architecture diagram | ❌ not created |
-| Demo video (~4 min) | ❌ not created |
+| Architecture diagram | ⚠️ `docs/ARCHITECTURE.md` (Deploy & Harden Phase 1g) — a written system diagram + component description; a rendered image asset is still open |
+| Demo video (~4 min) | ⚠️ `docs/DEMO.md`'s shot list/script exists; the actual live screen recording is still open — see that doc's "What must be true before this is recorded" section |
 | Bonus: technical build article | ❌ not created |
 | Bonus: social post | ❌ not created |
 | Bonus: additional Google model (Gemma) | ⚠️ documented substitution — `tools/fast_pii_screen.py` plays Gemma's architectural role (a cheap, independent pre-screen) using a naive deterministic classifier, since no Gemma model was pulled in this dev environment (confirmed with the user rather than downloading one unprompted) |
@@ -124,8 +124,10 @@ against the actual code (file:line) and confirmed real:
 **Evidence**: 6 new regression tests (`tests/test_orchestrator.py`) —
 2 unit tests proving `_consume()` acks only on success and nacks (not
 acks) on a handler exception; 4 live-Firestore tests proving
-`_dedup_claim()`'s claimed/done/stale_claim states. Full suite:
-**224/224 passing**. Live `run_full_migration.py` run against real
+`_dedup_claim()`'s claimed/done/stale_claim states. Full suite at the
+time of this fix: **224/224 passing** — historical; the suite has grown
+substantially since (see a dated `evaluation/reports/` snapshot for the
+current count, not this number). Live `run_full_migration.py` run against real
 Pub/Sub/Firestore/SQL Server/BigQuery reached `COMPLETE` with every
 `processed_messages` doc from that run's chain at `status="done"`, none
 stuck `"claimed"`, and `wave_state/slots` cleanly released.

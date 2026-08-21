@@ -20,6 +20,8 @@ import logging
 from tools.adapters.dag_artifact_adapter import DagArtifactAdapter
 from tools.adapters.oracle_corpus_adapter import OracleCorpusAdapter
 from tools.adapters.sqlserver_adapter import SqlServerAdapter
+from tools.invocation_context import InvocationContext
+from tools.policy_engine import authorize
 from tools.source_catalog import (
     catalog_dag_artifacts,
     catalog_oracle_corpus,
@@ -30,10 +32,20 @@ logger = logging.getLogger("discovery_agent")
 
 AGENT_ID = "discovery-agent"
 AGENT_VERSION = "2.0.0"
+PERMISSIONS_KEY = "discovery"  # matches policies/agent_permissions.yaml's top-level key
 
 
-def _discover_registered_estate(estate_id: str) -> tuple[list[dict], list[dict]]:
-    """Discover every source declared by one registered estate."""
+def _discover_registered_estate(estate_id: str, run_id: str | None = None) -> tuple[list[dict], list[dict]]:
+    """Discover every source declared by one registered estate.
+
+    Tool-level policy checkpoint (Deploy & Harden Phase 1b, ADR 0001):
+    authorizes each source's discovery independently, right before the
+    adapter call that actually touches it — distinct from, and in
+    addition to, the capability-dispatch gate `invoke_capability()`
+    already checked before this function ran at all. A DENY here raises
+    tools/policy_engine.py::PolicyDenied and this loop does not fall
+    through to adapter.discover_tables().
+    """
     from tools.adapters import build_adapter_for_binding
     from tools.connection_context import binding_from_estate, load_estate_document
 
@@ -43,6 +55,17 @@ def _discover_registered_estate(estate_id: str) -> tuple[list[dict], list[dict]]
     for source in estate.get("sources") or []:
         binding = binding_from_estate(estate, source["source_id"])
         adapter = build_adapter_for_binding(binding)
+        authorize(
+            InvocationContext(
+                agent_id=PERMISSIONS_KEY,
+                action="source.catalog.registered_estate",
+                resource_class="METADATA",  # discovery is metadata-only by design — never PII/MASKED
+                run_id=run_id,
+                estate_id=estate_id,
+                acting_identity=AGENT_ID,
+                tool_name=f"{type(adapter).__name__}.discover",
+            )
+        )
         try:
             source_tables = adapter.discover_tables()
             source_pipelines = adapter.discover_pipelines()
@@ -74,6 +97,7 @@ def discover_estate(
     dag_artifacts_path: str | None = None,
     *,
     estate_id: str | None = None,
+    run_id: str | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Runs discovery across all three sources and returns
     (table_records, pipeline_records) — via tools/adapters/'s
@@ -100,7 +124,7 @@ def discover_estate(
     assets".
     """
     if estate_id:
-        return _discover_registered_estate(estate_id)
+        return _discover_registered_estate(estate_id, run_id=run_id)
 
     if oracle_corpus_path is None or dag_artifacts_path is None:
         raise ValueError(
@@ -108,6 +132,17 @@ def discover_estate(
             "registered discovery requires estate_id."
         )
 
+    def _ctx(action: str, tool_name: str) -> InvocationContext:
+        return InvocationContext(
+            agent_id=PERMISSIONS_KEY,
+            action=action,
+            resource_class="METADATA",
+            run_id=run_id,
+            acting_identity=AGENT_ID,
+            tool_name=tool_name,
+        )
+
+    authorize(_ctx("source.catalog.sql_server", "SqlServerAdapter.discover_tables"))
     sql_adapter = SqlServerAdapter()
     try:
         sql_server_tables = sql_adapter.discover_tables()
@@ -119,6 +154,7 @@ def discover_estate(
         raise
     logger.info("SqlServerAdapter.discover_tables: %d tables", len(sql_server_tables))
 
+    authorize(_ctx("source.catalog.oracle_corpus", "OracleCorpusAdapter.discover_tables"))
     oracle_adapter = OracleCorpusAdapter(oracle_corpus_path)
     oracle_tables = oracle_adapter.discover_tables()
     oracle_adapter.record_connection_health(
@@ -126,6 +162,7 @@ def discover_estate(
     )
     logger.info("OracleCorpusAdapter.discover_tables: %d tables", len(oracle_tables))
 
+    authorize(_ctx("source.catalog.dag_artifacts", "DagArtifactAdapter.discover_pipelines"))
     dag_adapter = DagArtifactAdapter(dag_artifacts_path)
     pipelines = dag_adapter.discover_pipelines()
     dag_adapter.record_connection_health(

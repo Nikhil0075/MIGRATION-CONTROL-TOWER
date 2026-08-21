@@ -326,6 +326,41 @@ for sa in sa-validation sa-cutover; do
     --quiet >/dev/null
 done
 
+########################################################################
+# Optional: Cloud Billing Budget alert (Deploy & Harden Phase 1d)
+#
+# Opt-in, not automatic — a budget needs a real dollar/rupee figure and
+# billing.budgets.create/update on the BILLING ACCOUNT (separate from
+# every project-level role this script grants above), so a silent
+# default here would either invent a number or fail this whole otherwise
+# reliable script on a permission this account may not have. Set all
+# three to run it:
+#
+#   WITH_BILLING_BUDGET=1 BILLING_BUDGET_AMOUNT=28440 \
+#     BILLING_BUDGET_CURRENCY=INR bash infrastructure/gcp_setup.sh
+#
+# A budget is an alert, not a spending cap — see
+# infrastructure/setup_billing_budget.py's docstring and docs/GOVERNANCE.md.
+########################################################################
+if [ "${WITH_BILLING_BUDGET:-0}" = "1" ]; then
+  if [ -z "${BILLING_BUDGET_AMOUNT:-}" ] || [ -z "${BILLING_BUDGET_CURRENCY:-}" ]; then
+    echo "==> WITH_BILLING_BUDGET=1 but BILLING_BUDGET_AMOUNT/BILLING_BUDGET_CURRENCY not set — skipping."
+  else
+    BILLING_ACCOUNT="$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingAccountName)' 2>/dev/null | sed 's#^billingAccounts/##')"
+    if [ -z "$BILLING_ACCOUNT" ]; then
+      echo "==> No billing account linked to $PROJECT_ID — skipping budget setup." >&2
+    else
+      echo "==> Setting up Cloud Billing Budget ($BILLING_BUDGET_AMOUNT $BILLING_BUDGET_CURRENCY, account $BILLING_ACCOUNT)..."
+      python "$(dirname "$0")/setup_billing_budget.py" \
+        --billing-account "$BILLING_ACCOUNT" \
+        --amount "$BILLING_BUDGET_AMOUNT" \
+        --currency "$BILLING_BUDGET_CURRENCY" \
+        --project "$PROJECT_ID" \
+        --yes || echo "==> Billing budget setup failed (see message above) — continuing; this is optional and does not abort the rest of setup." >&2
+    fi
+  fi
+fi
+
 echo "==> Done. Summary:"
 echo "    Project:        $PROJECT_ID"
 echo "    Region:         $REGION"
