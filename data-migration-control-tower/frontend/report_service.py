@@ -12,6 +12,7 @@ import uuid
 from typing import Literal
 from xml.sax.saxutils import escape
 
+from google.cloud import firestore
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
@@ -40,6 +41,53 @@ _SUBCOLLECTIONS = {
 
 def _now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+class ReportQuotaExceeded(RuntimeError):
+    """Raised by consume_report_quota() when a user has requested too
+    many reports today (Deploy & Harden Phase 5) — mirrors
+    frontend/assistant_service.py::_consume_quota()'s proven Firestore-
+    transaction pattern (same "read count, refuse or increment, all in
+    one transaction" shape), since PDF/JSON report generation is real
+    compute + storage cost per request, same as an assistant message,
+    and had no rate limit at all before this."""
+
+
+def consume_report_quota(uid: str) -> None:
+    """Atomically checks and increments uid's daily report-generation
+    count; raises ReportQuotaExceeded once REPORT_DAILY_LIMIT is hit.
+    Call this BEFORE queuing a report — not after — so a user who has
+    exhausted their quota never gets a "queued" response that then
+    silently never generates.
+    """
+    client = get_client()
+    key = f"{uid}_{dt.datetime.now(dt.timezone.utc).date().isoformat()}"
+    ref = client.collection("report_daily_usage").document(key)
+    limit = int(os.environ.get("REPORT_DAILY_LIMIT", "20"))
+
+    @firestore.transactional
+    def increment(transaction):
+        snapshot = ref.get(transaction=transaction)
+        count = int((snapshot.to_dict() or {}).get("count", 0)) if snapshot.exists else 0
+        if count >= limit:
+            raise ReportQuotaExceeded(
+                f"Daily report generation limit ({limit}) reached for this user. Try again tomorrow."
+            )
+        transaction.set(
+            ref,
+            {
+                "uid": uid,
+                "date": dt.datetime.now(dt.timezone.utc).date().isoformat(),
+                "count": count + 1,
+                # Matches assistant_service.py's own 2-day TTL reasoning —
+                # long enough to be inspectable the day after, short
+                # enough not to accumulate forever.
+                "expires_at": dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=2),
+            },
+            merge=True,
+        )
+
+    increment(client.transaction())
 
 
 def _snapshot(run_id: str, report_type: ReportType) -> dict:

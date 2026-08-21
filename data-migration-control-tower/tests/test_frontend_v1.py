@@ -354,6 +354,23 @@ def test_legacy_shell_retains_temporary_compatibility_csp(client: TestClient) ->
     assert "https://unpkg.com" in csp
 
 
+def test_legacy_shell_is_404_by_default(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deploy & Harden Phase 5: a public deployment must not expose the
+    legacy UI shell unless explicitly opted into — this is the actual
+    gate, distinct from the CSP-header test above (which passes
+    regardless of status code, since the middleware keys off the
+    requested URL, not the response)."""
+    monkeypatch.delenv("ENABLE_LEGACY_UI", raising=False)
+    response = client.get("/legacy")
+    assert response.status_code == 404
+
+
+def test_legacy_shell_is_reachable_when_explicitly_enabled(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENABLE_LEGACY_UI", "1")
+    response = client.get("/legacy")
+    assert response.status_code == 200
+
+
 def test_client_deep_link_returns_release_shell(client: TestClient) -> None:
     response = client.get("/system-health")
     assert response.status_code == 200

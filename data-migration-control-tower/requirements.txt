@@ -74,3 +74,10 @@ opentelemetry-resourcedetector-gcp==1.14.0
 # Testing
 pytest==8.3.3
 httpx>=0.27.0  # fastapi.testclient.TestClient
+
+# Offline Terraform syntax validation (Deploy & Harden Phase 2/5) — no
+# `terraform` binary is available in this dev environment, so
+# tests/test_terraform_monitoring.py parses the HCL directly instead of
+# shelling out to `terraform validate`. Test-only; not imported by any
+# runtime code path.
+python-hcl2==8.1.2

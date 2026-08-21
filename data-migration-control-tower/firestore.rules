@@ -1,0 +1,36 @@
+// Deploy & Harden Phase 5 — Firestore direct-access security rules.
+//
+// This project's whole data-access model (CLAUDE.md's "Firestore is the
+// only datastore" section) is: the Python backend (tools/firestore_client.py,
+// using the server-side google-cloud-firestore Admin SDK under a service
+// account) is the ONLY thing that ever reads or writes Firestore.
+// Confirmed directly, not assumed: the frontend client bundle
+// (frontend/client/src/) has zero references to the Firebase Firestore
+// client SDK anywhere — every read/write goes through the authenticated,
+// estate-scoped, role-checked REST API in frontend/api_v1.py.
+//
+// The Admin SDK always bypasses Security Rules — these rules exist
+// PURELY to close off DIRECT client-SDK access (the case where someone
+// obtains a valid Firebase ID token — trivial, since Firebase API keys
+// are public by design, restricted by rules rather than secrecy — and
+// tries to query Firestore straight from a browser, bypassing every
+// estate-scoping/RBAC/policy-engine check that only exists in the
+// Python API layer). Since the app never needs client-SDK access at
+// all, the correct rule is unconditional denial, not a narrower
+// per-collection allowlist that would still leave a client-reachable
+// surface to audit.
+//
+// If a future feature genuinely needs client-SDK Firestore access
+// (e.g. a real-time listener), it must be added here explicitly, scoped
+// to exactly what it needs, with its own justification — not by
+// loosening this default.
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

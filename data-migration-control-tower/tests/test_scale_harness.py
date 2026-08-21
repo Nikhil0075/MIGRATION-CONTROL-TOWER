@@ -102,6 +102,13 @@ def test_write_report_writes_a_tier_keyed_doc_and_a_current_alias():
     }
     reports_col = get_client().collection("evaluation_scale_reports")
     tier_file = REAL_REPORTS_DIR / f"scale_metrics_{count}.md"
+    current_file = REAL_REPORTS_DIR / "scale_metrics.md"
+    # "current" (the Firestore doc) stays deliberately un-deleted — see
+    # below — but the on-disk alias is a real committed repo artifact
+    # (the latest real scale run's evidence), not a shared resource
+    # other concurrent *processes* read from disk. Snapshot it so this
+    # test's write gets undone locally, same as the tier-suffixed file.
+    pre_existing_current = current_file.read_text(encoding="utf-8") if current_file.exists() else None
     try:
         write_report(metrics, reports_dir=REAL_REPORTS_DIR)
 
@@ -115,15 +122,21 @@ def test_write_report_writes_a_tier_keyed_doc_and_a_current_alias():
 
         # Both files written: the tier-suffixed one and the fixed-name alias.
         assert tier_file.exists()
-        assert (REAL_REPORTS_DIR / "scale_metrics.md").exists()
+        assert current_file.exists()
     finally:
         reports_col.document(str(count)).delete()
         tier_file.unlink(missing_ok=True)
-        # "current" (Firestore doc AND scale_metrics.md file) is
-        # shared/global — deliberately NOT deleted here, to avoid a test
-        # run clobbering another process's view of "the latest tier";
-        # this test only asserts current was set to ITS value at the
-        # time it ran, not that it stays that way after.
+        # The Firestore "current" doc is shared/global — deliberately NOT
+        # deleted here, to avoid a test run clobbering another process's
+        # view of "the latest tier"; this test only asserts current was
+        # set to ITS value at the time it ran, not that it stays that way
+        # after. The on-disk file, though, only this checkout's test
+        # process writes to — restore it so a full test-suite run doesn't
+        # leave fake data sitting in a real, committed evidence file.
+        if pre_existing_current is None:
+            current_file.unlink(missing_ok=True)
+        else:
+            current_file.write_text(pre_existing_current, encoding="utf-8")
 
 
 @skip_if_no_firestore
@@ -137,6 +150,8 @@ def test_write_report_does_not_clobber_a_different_tiers_doc():
     reports_col = get_client().collection("evaluation_scale_reports")
     counts = [base, base + 1]
     tier_files = [REAL_REPORTS_DIR / f"scale_metrics_{count}.md" for count in counts]
+    current_file = REAL_REPORTS_DIR / "scale_metrics.md"
+    pre_existing_current = current_file.read_text(encoding="utf-8") if current_file.exists() else None
     try:
         for count in counts:
             metrics = {
@@ -160,5 +175,11 @@ def test_write_report_does_not_clobber_a_different_tiers_doc():
     finally:
         for count in counts:
             reports_col.document(str(count)).delete()
+        for tier_file in tier_files:
+            tier_file.unlink(missing_ok=True)
+        if pre_existing_current is None:
+            current_file.unlink(missing_ok=True)
+        else:
+            current_file.write_text(pre_existing_current, encoding="utf-8")
         for tier_file in tier_files:
             tier_file.unlink(missing_ok=True)

@@ -82,12 +82,16 @@ citing an "actual cost" figure anywhere.
 ## What's declared but not (yet) exercised
 
 `infrastructure/gcp_setup.sh` creates seven real, distinct IAM service accounts (one per agent)
-with genuinely differing role bindings. Until Deploy & Harden Phase 2's distributed deployment
-lands, every agent still runs in-process inside the orchestrator under generic Application Default
-Credentials — so these service accounts are real, correctly-scoped identities that exist in IAM but
-are not yet what's actually running the code. Say exactly that; don't imply per-agent workload
-identity is enforced at runtime until each agent is its own deployed Cloud Run service with that
-SA attached (`gcp_setup.sh`'s own closing comment already says this candidly).
+with genuinely differing role bindings. Deploy & Harden Phase 2 added everything needed to actually
+run each agent as its own Cloud Run service under its own SA — `agents/*/service_main.py`
+entrypoints, per-service Dockerfiles, and `infrastructure/terraform/cloud_run.tf` — but that
+Terraform is gated behind `deploy_cloud_run_services` (default `false`, see
+`infrastructure/terraform/variables.tf`) and, as of this writing, no `terraform apply` enabling it
+has been run against the live project. So: the distributed-deployment *code and IaC* are complete
+and unit-tested, but every agent still runs in-process inside the orchestrator under generic
+Application Default Credentials until that flag is flipped and applied for real — say exactly that
+distinction (code/IaC complete vs. live-deployed) rather than letting them blur, per
+`docs/compliance_matrix.md`'s five-label discipline.
 
 ## Untrusted content stays untrusted
 
@@ -99,6 +103,47 @@ plus `simulator/injection_corpus/` (12 adversarial cases across 4 families) and
 substitution for Model Armor (unavailable in this setup) — a deterministic containment layer, not
 a model-based content-safety check, and correctly labeled as such rather than implied to be the
 managed product.
+
+## Secret rotation policy (Deploy & Harden Phase 5)
+
+Nothing here is live rotation — no secret has been created in the deployed project yet, since
+nothing is deployed live yet (previous section). This is the policy that governs rotation once it
+is, so it's decided in advance rather than improvised under pressure the first time a credential
+needs to change.
+
+**What can even be rotated, by design**: `tools/secret_resolver.py`'s whole point (see its module
+docstring) is that every connection profile carries a *reference* — a Secret Manager name or an env
+var name — never a credential value. `contracts/metadata_model.json`'s `ConnectionProfile` is closed
+(`additionalProperties: false`) and `tests/test_contracts.py` asserts it declares no credential-value
+field. That property is what makes rotation possible without touching estate config at all: the
+reference stays the same, only the value behind it changes.
+
+**Rotation procedure** (once secrets are live in Secret Manager):
+1. Add a new secret **version** under the same secret name — never overwrite a version in place;
+   Secret Manager versions are immutable by design, which is also what makes instant rollback
+   possible (point back at the prior version) if the new credential turns out to be wrong.
+2. `tools/secret_resolver.py`'s `DEFAULT_CACHE_TTL_SECONDS = 300` means a running process picks up
+   the new version within 5 minutes without a restart — no coordinated "rotate secret and redeploy
+   simultaneously" step required for the common case.
+3. Confirm the old database/API credential still works for a short overlap window (a source system's
+   own credential-change propagation delay, not this app's), then disable — not delete — the prior
+   version. Deletion is a separate, deliberate step after the overlap window closes cleanly.
+4. `describe_resolution()` (same module) surfaces which backend/version path actually answered a
+   given resolution — check this in the health-check UI after any rotation to confirm the new
+   version is the one actually being read, not the cached prior one.
+
+**Trigger cadence**: rotate on suspicion of exposure (immediately, out of band from this schedule),
+on personnel change for anyone with Secret Manager access, and — for the demo window specifically —
+there is no long-lived credential that survives Phase 0's teardown checkpoint (end of the Aug 30 –
+Oct 3, 2026 window or credit exhaustion, whichever is sooner) at all, since `infrastructure/teardown.sh`
+and `terraform destroy` remove the resources the secrets protect. A calendar-based rotation cadence
+(e.g. 90 days) only becomes meaningful for a deployment that outlives this trial window — noted here
+as the policy a production deployment would need, not claimed as already scheduled.
+
+**What this does not cover**: Firebase Auth user credentials (password resets are a documented
+separate flow, not a "secret" in the Secret Manager sense) and the OIDC tokens Cloud Run services
+mint for each other (Phase 2c) — those are short-lived and self-rotating by Google's own token
+lifetime, not something this project's policy manages.
 
 ## See also
 

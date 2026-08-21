@@ -75,14 +75,29 @@ def test_write_report_persists_both_sections():
         "subscriptions": [], "note": "test note",
     }
     real_dir = REPO_ROOT / "evaluation" / "reports"
-    write_report(concurrent_load, fleet_state, reports_dir=real_dir)
+    report_file = real_dir / "load_test_metrics.md"
+    # This file has no "real" prior content — evaluation/load_test.py is
+    # new this phase, so the only way it exists at all is a prior test
+    # run leaving it behind (the bug this fixture-cleanup closes). Track
+    # whether it pre-existed so cleanup restores exactly that state
+    # rather than assuming "always delete" or "never delete".
+    pre_existing_content = report_file.read_text(encoding="utf-8") if report_file.exists() else None
+    try:
+        write_report(concurrent_load, fleet_state, reports_dir=real_dir)
 
-    assert (real_dir / "load_test_metrics.md").exists()
-    content = (real_dir / "load_test_metrics.md").read_text(encoding="utf-8")
-    assert "5" in content and "hello-agent" in content
-
-    # Cleanup: find and remove the doc(s) this test just wrote.
-    docs = list(get_client().collection("evaluation_load_reports").where("concurrent_load.concurrent_runs", "==", 5).stream())
-    for doc in docs:
-        if doc.to_dict().get("fleet_state", {}).get("note") == "test note":
-            doc.reference.delete()
+        assert report_file.exists()
+        content = report_file.read_text(encoding="utf-8")
+        assert "5" in content and "hello-agent" in content
+    finally:
+        # Cleanup: find and remove the doc(s) this test just wrote.
+        docs = list(get_client().collection("evaluation_load_reports").where("concurrent_load.concurrent_runs", "==", 5).stream())
+        for doc in docs:
+            if doc.to_dict().get("fleet_state", {}).get("note") == "test note":
+                doc.reference.delete()
+        # Restore the on-disk file to what it was before this test ran —
+        # a real prior report is a repo artifact, worth keeping honest;
+        # a file this test itself created should not survive it.
+        if pre_existing_content is None:
+            report_file.unlink(missing_ok=True)
+        else:
+            report_file.write_text(pre_existing_content, encoding="utf-8")

@@ -3039,7 +3039,7 @@ def create_report(
     authorize_estate(user, estate_id, "viewer")
 
     from frontend.operations import _operation_id, _validated_key
-    from frontend.report_service import generate_background
+    from frontend.report_service import ReportQuotaExceeded, consume_report_quota, generate_background
 
     try:
         key = _validated_key(idempotency_key)
@@ -3051,6 +3051,17 @@ def create_report(
     existing = ref.get()
     if existing.exists:
         return _envelope({"report_id": report_id, **(existing.to_dict() or {})})
+
+    # Deploy & Harden Phase 5: rate limit BEFORE queuing, not after — a
+    # user who has exhausted their quota must never see a "queued"
+    # response for a report that then silently never generates. Checked
+    # only once the idempotency short-circuit above has ruled out a
+    # duplicate request, so retrying an ALREADY-queued report never
+    # double-counts against the quota.
+    try:
+        consume_report_quota(user.uid)
+    except ReportQuotaExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     now = _now()
     record = {
         "report_id": report_id, "report_type": body.report_type, "run_id": body.run_id,

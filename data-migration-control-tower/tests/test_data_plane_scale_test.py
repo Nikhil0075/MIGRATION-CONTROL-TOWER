@@ -70,7 +70,7 @@ def test_run_data_plane_test_handles_a_pending_async_manifest(monkeypatch):
 
 
 @skip_if_no_firestore
-def test_write_report_persists_to_firestore_and_disk(tmp_path):
+def test_write_report_persists_to_firestore_and_disk():
     from tools.firestore_client import get_client
 
     run_id = f"test-report-{uuid.uuid4().hex[:8]}"
@@ -81,15 +81,25 @@ def test_write_report_persists_to_firestore_and_disk(tmp_path):
         "duration_ms": 1000, "throughput_rows_per_sec": 500.0, "status": "COMPLETED",
     }
     collection = get_client().collection("evaluation_data_plane_reports")
+    # write_report() calls path.relative_to(REPO_ROOT), so reports_dir
+    # must be inside the repo tree — same constraint as scale_harness.py.
+    real_dir = REPO_ROOT / "evaluation" / "reports"
+    report_file = real_dir / "data_plane_scale_metrics.md"
+    # Same reasoning as test_load_test.py's fixture: this file has no
+    # "real" prior content (evaluation/data_plane_scale_test.py is new
+    # this phase), so track whether a previous run left one behind and
+    # restore exactly that state, not just always-delete.
+    pre_existing_content = report_file.read_text(encoding="utf-8") if report_file.exists() else None
     try:
-        # write_report() calls path.relative_to(REPO_ROOT), so reports_dir
-        # must be inside the repo tree — same constraint as scale_harness.py.
-        real_dir = REPO_ROOT / "evaluation" / "reports"
         write_report(metrics, reports_dir=real_dir)
 
         doc = collection.document(run_id).get()
         assert doc.exists
         assert doc.to_dict()["rows_moved"] == 500
-        assert (real_dir / "data_plane_scale_metrics.md").exists()
+        assert report_file.exists()
     finally:
         collection.document(run_id).delete()
+        if pre_existing_content is None:
+            report_file.unlink(missing_ok=True)
+        else:
+            report_file.write_text(pre_existing_content, encoding="utf-8")

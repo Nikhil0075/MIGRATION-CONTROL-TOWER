@@ -438,8 +438,23 @@ app.include_router(api_v1_public_router)
 app.include_router(api_v1_router)
 
 
+def _legacy_ui_enabled() -> bool:
+    return os.environ.get("ENABLE_LEGACY_UI", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 @app.get("/legacy")
 def legacy_index() -> FileResponse:
+    """Deploy & Harden Phase 5: gated behind ENABLE_LEGACY_UI, off by
+    default. This shell's own app.js has had a real XSS finding fixed
+    here before (esc()-everywhere, Day 10 hardening) — a public
+    deployment should not expose a second, less-actively-maintained UI
+    surface unless explicitly opted into for a rollback/compatibility
+    reason. Data access underneath still goes through the same
+    Firebase-authenticated /api/* routes either way; this gate is about
+    reducing exposed surface, not about a different auth boundary.
+    """
+    if not _legacy_ui_enabled():
+        raise HTTPException(status_code=404, detail="Not found.")
     return FileResponse(str(STATIC_DIR / "index.html"), headers={"Cache-Control": "no-cache"})
 
 
