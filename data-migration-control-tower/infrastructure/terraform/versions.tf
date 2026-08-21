@@ -3,9 +3,9 @@
 # functionally interchangeable for everything this module uses; pick
 # whichever your CI/local toolchain already has.
 #
-# NOT validated against a real `terraform validate`/`plan` in this
-# environment — neither binary is installed here. Run both before the
-# first `apply`, per infrastructure/terraform/README.md's checklist.
+# Live-applied with Terraform 1.9.8 against the real autonomous-data-migration
+# project (Deploy & Harden Phase 5 close-out) — see README.md's opening
+# note for what that live apply actually found and fixed.
 
 terraform {
   required_version = ">= 1.5.0"
@@ -30,7 +30,7 @@ terraform {
   # cannot create the bucket it stores its own state in). Fill in the
   # real bucket name before first `terraform init`.
   backend "gcs" {
-    bucket = "REPLACE_WITH_STATE_BUCKET_NAME" # e.g. autonomous-data-migration-tfstate
+    bucket = "autonomous-data-migration-tfstate"
     prefix = "control-tower"
   }
 }

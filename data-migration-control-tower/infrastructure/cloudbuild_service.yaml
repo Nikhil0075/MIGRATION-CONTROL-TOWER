@@ -1,0 +1,16 @@
+# Generic Cloud Build config for building one Deploy & Harden Phase 2
+# service image with its own Dockerfile (gcloud builds submit --tag only
+# supports a Dockerfile at the repo root, so this templated config is
+# the way to build agents/*/Dockerfile / frontend/Dockerfile with a
+# repo-root build context via a remote build — no local Docker daemon
+# needed). Not meant to be committed as each service's permanent build
+# definition (Terraform doesn't manage Cloud Build triggers in this
+# module) — a one-time deploy tool for this session's manual rollout.
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    args: ["build", "-t", "${_IMAGE}", "-f", "${_DOCKERFILE}", "."]
+images:
+  - "${_IMAGE}"
+options:
+  machineType: "E2_HIGHCPU_8"
+timeout: "1200s"

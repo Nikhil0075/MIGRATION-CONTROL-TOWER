@@ -1,9 +1,18 @@
 # Terraform module — Deploy & Harden Phase 2a
 
-`docs/adr/0004-terraform-for-infrastructure.md` explains why this exists. **Not validated against a
-real `terraform validate`/`plan` in this environment** — neither `terraform` nor `tofu` is
-installed here. Run both, and read their output carefully, before the first `apply`. Treat this
-module as reviewed-by-construction, not proven-by-execution, until that happens.
+`docs/adr/0004-terraform-for-infrastructure.md` explains why this exists. **Live-applied** against
+the real `autonomous-data-migration` project (Deploy & Harden Phase 5 close-out) — the full
+9-service Cloud Run topology plus every foundational resource (Pub/Sub, BigQuery, Artifact
+Registry, IAM, monitoring) is deployed and `terraform plan` shows zero drift. Three real bugs
+surfaced only by that live apply, now fixed: three cross-agent imports (`agents/discovery`,
+`agents/planner`, `agents/cutover`) reachable from `service_main.py` needed the whole `agents/`
+tree copied into their images, not just their own subdirectory; `agents/planner/Dockerfile` needed
+the unixODBC build step despite being designed as the "lean" variant, because
+`tools/pack_loader` transitively imports `pyodbc`; and `requirements.txt` had three version pins
+(`fastapi`, `pydantic`, `opentelemetry-sdk`) that were resolvable in this dev environment's
+already-populated Python install but not in a genuinely fresh one, because `google-adk==2.7.1`'s
+own floor/ceiling constraints on those packages were tighter than what was pinned. `enable_cloud_sql`
+and `enable_data_plane_job` remain unexercised live — see their own checkpoints below.
 
 ## Bootstrap (one time)
 

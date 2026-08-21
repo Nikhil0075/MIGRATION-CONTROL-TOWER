@@ -17,6 +17,10 @@ resource "google_bigquery_dataset" "billing_export" {
   # Billing export refuses single-region datasets — must be a US/EU
   # multi-region (matches gcp_setup.sh's own comment on this).
   location = "US"
+  # Matches gcp_setup.sh's own description string exactly — set here so
+  # importing this dataset (infrastructure/terraform/README.md's import
+  # step) doesn't wipe it out as a spurious in-place update.
+  description = "Cloud Billing export. Must be a US/EU multi-region: billing export refuses single-region datasets."
 }
 
 resource "google_storage_bucket" "reports" {

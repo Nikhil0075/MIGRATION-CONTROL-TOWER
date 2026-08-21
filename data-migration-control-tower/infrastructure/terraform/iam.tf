@@ -19,14 +19,36 @@ locals {
 
   vertex_ai_agent_sas   = ["sa-discovery", "sa-lineage", "sa-planner"]
   bigquery_editor_agent_sas = ["sa-validation", "sa-cutover"]
+
+  # Matches gcp_setup.sh's AGENT_SAS map exactly — importing these
+  # already-existing SAs (README.md's import checklist) must not
+  # overwrite each one's real display name with its bare account_id;
+  # that regression was caught in a `terraform plan` dry run before the
+  # first apply (`google_service_account.agent[*] display_name "Risk &
+  # Compliance Agent" -> "sa-risk"`, etc.) and fixed here instead of
+  # applied.
+  agent_display_names = {
+    "sa-orchestrator"   = "Migration Orchestrator (hello-agent, Day 1)"
+    "sa-discovery"      = "Discovery Agent"
+    "sa-lineage"        = "Lineage Agent"
+    "sa-risk"           = "Risk & Compliance Agent"
+    "sa-planner"        = "Migration Planner"
+    "sa-validation"     = "Validation & Reconciliation Agent"
+    "sa-cutover"        = "Cutover Agent"
+    "sa-finance-impact" = "Finance Reporting Impact Agent (Finance Systems dept)"
+  }
 }
 
 resource "google_service_account" "agent" {
   for_each = toset(var.agent_service_account_ids)
 
-  project      = var.project_id
-  account_id   = each.value
-  display_name = each.value
+  project    = var.project_id
+  account_id = each.value
+  # Falls back to the bare account_id only for an SA this map doesn't
+  # name explicitly (e.g. a future addition to agent_service_account_ids)
+  # rather than erroring — better a plain-but-harmless display name than
+  # a failed apply.
+  display_name = lookup(local.agent_display_names, each.value, each.value)
 }
 
 resource "google_service_account" "pubsub_invoker" {

@@ -1,0 +1,31 @@
+# Copy to terraform.tfvars (gitignored — see .gitignore's note) and
+# fill in real values for your project. This is what the live Deploy &
+# Harden deployment actually used, with image tags shown for shape only.
+
+project_id = "autonomous-data-migration"
+
+# false until at least one image per service has been built and pushed
+# (see infrastructure/terraform/README.md's "Safe rollout sequence").
+deploy_cloud_run_services = true
+
+service_image_tags = {
+  "control-tower-ui"    = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/control-tower-ui:v1"
+  "orchestrator"         = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/orchestrator:v1"
+  "discovery-agent"      = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/discovery-agent:v1"
+  "lineage-agent"        = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/lineage-agent:v1"
+  "risk-agent"           = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/risk-agent:v1"
+  "planner-agent"        = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/planner-agent:v1"
+  "validation-agent"     = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/validation-agent:v1"
+  "cutover-agent"        = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/cutover-agent:v1"
+  "finance-impact-agent" = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/finance-impact-agent:v1"
+}
+
+# Uncomment once a Postgres pricing tier is confirmed (Phase 3b's checkpoint):
+# enable_cloud_sql = true
+
+# Uncomment once the data-plane job image is built and pushed:
+# enable_data_plane_job    = true
+# data_plane_job_image_tag = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/data-plane-job:v1"
+
+# At least one entry here before any monitoring alert fires anywhere:
+# alert_notification_channels = ["projects/PROJECT_ID/notificationChannels/CHANNEL_ID"]

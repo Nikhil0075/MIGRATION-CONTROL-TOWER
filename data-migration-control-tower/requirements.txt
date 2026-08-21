@@ -1,6 +1,12 @@
 # Core
 python-dotenv==1.0.1
-pydantic==2.9.2
+# Bumped from 2.9.2 (Deploy & Harden Phase 2, discovered live via a
+# fresh Cloud Build install — same class of bug as the fastapi and
+# opentelemetry-sdk pins below): google-adk==2.7.1 requires
+# pydantic<3,>=2.12, so 2.9.2 is no longer resolvable at all. 2.13.4 is
+# what this dev environment already had installed and already-tested
+# against.
+pydantic==2.13.4
 jsonschema==4.23.0
 PyYAML>=6.0.2  # policies/*.yaml (agent permissions, data classification)
 # Direct dependency of tools/capability_dispatch_client.py (Deploy &
@@ -48,7 +54,15 @@ google-genai==2.19.0
 Deprecated>=1.2.14  # transitive opentelemetry dependency not always pulled in automatically
 
 # Web service for Cloud Run
-fastapi==0.115.0
+#
+# Bumped from 0.115.0 (Deploy & Harden Phase 2, discovered live): a
+# fresh `pip install` now fails outright — google-adk==2.7.1 (pinned
+# above) requires fastapi<1,>=0.133, so 0.115.0 is no longer
+# resolvable at all, not just outdated. This dev environment's actual
+# installed fastapi (what every test this session already ran against)
+# is 0.141.1, which does satisfy that floor — pinning to exactly that
+# version rather than an untested one.
+fastapi==0.141.1
 uvicorn[standard]>=0.34.0  # floor set by google-adk's own dependency
 
 # Control Tower UI auth (Day 10 hardening, §5.2): server-side ID-token
@@ -67,7 +81,14 @@ google-cloud-storage>=2.19.0  # private immutable report artifacts
 # in Cloud Trace."). All three were already pulled in transitively by
 # google-cloud-aiplatform/google-adk (confirmed via `pip show`) — pinned
 # explicitly here now that tools/tracing.py depends on them directly.
-opentelemetry-sdk==1.43.0
+#
+# Pinned to 1.42.1, not 1.43.0 (Deploy & Harden Phase 2, discovered
+# live via a fresh Cloud Build install, same class of bug as the
+# fastapi pin above): google-adk==2.7.1 requires
+# opentelemetry-sdk<=1.42.1,>=1.39, so 1.43.0 makes a clean install
+# unresolvable. 1.42.1 is exactly what this dev environment already had
+# installed and already-tested against.
+opentelemetry-sdk==1.42.1
 opentelemetry-exporter-gcp-trace==1.14.0
 opentelemetry-resourcedetector-gcp==1.14.0
 

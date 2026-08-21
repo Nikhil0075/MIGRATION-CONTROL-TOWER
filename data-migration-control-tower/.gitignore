@@ -42,3 +42,13 @@ build/
 # estate metadata (table and column names) and are local safety copies,
 # not artefacts to publish.
 var/
+
+# Terraform (Deploy & Harden Phase 2/5). *.tfplan is a binary artifact of
+# one specific `terraform plan` run against live state — never meant to
+# be reviewed as a diff or replayed elsewhere. terraform.tfvars holds
+# this deployment's real values (which services are live,
+# service_image_tags); *.tfvars.example documents the shape without
+# committing a specific live deployment's state as if it were the
+# module's default.
+infrastructure/terraform/*.tfplan
+infrastructure/terraform/terraform.tfvars

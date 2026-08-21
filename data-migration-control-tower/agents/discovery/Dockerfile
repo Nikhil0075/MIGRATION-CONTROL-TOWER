@@ -27,8 +27,17 @@ COPY tools/ tools/
 COPY contracts/ contracts/
 COPY policies/ policies/
 COPY packs/ packs/
-COPY agents/discovery/ agents/discovery/
-COPY agents/__init__.py agents/__init__.py
+# Whole agents/ tree, not just agents/discovery/ — discovered live
+# (Deploy & Harden Phase 5 close-out): run_assessment.py imports
+# directly from agents.lineage, agents.orchestrator, agents.planner
+# and agents.risk, and this is genuinely reachable from
+# service_main.py's own import chain (via run_assessment_worker.py),
+# not a dev-only script. A narrower per-agent COPY crashed this
+# container at startup with ModuleNotFoundError. Matches
+# agents/orchestrator/Dockerfile and frontend/Dockerfile's existing
+# choice to just copy the whole tree rather than re-litigate exactly
+# which cross-agent imports are reachable each time one changes.
+COPY agents/ agents/
 
 ENV PYTHONPATH=/app
 ENV PORT=8080

@@ -17,8 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY tools/ tools/
 COPY contracts/ contracts/
 COPY policies/ policies/
-COPY agents/risk/ agents/risk/
-COPY agents/__init__.py agents/__init__.py
+# Whole agents/ tree — see agents/discovery/Dockerfile's comment
+# (Deploy & Harden Phase 5 close-out).
+COPY agents/ agents/
 
 ENV PYTHONPATH=/app
 ENV PORT=8080

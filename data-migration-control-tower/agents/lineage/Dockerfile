@@ -21,8 +21,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY tools/ tools/
 COPY contracts/ contracts/
 COPY policies/ policies/
-COPY agents/lineage/ agents/lineage/
-COPY agents/__init__.py agents/__init__.py
+# Whole agents/ tree — see agents/discovery/Dockerfile's comment on
+# this (Deploy & Harden Phase 5 close-out): run_lineage.py imports
+# agents.orchestrator.run_lifecycle, and cross-agent imports like this
+# proved genuinely hard to enumerate safely per-service.
+COPY agents/ agents/
 
 ENV PYTHONPATH=/app
 ENV PORT=8080
