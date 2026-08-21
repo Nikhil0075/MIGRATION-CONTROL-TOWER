@@ -1,0 +1,80 @@
+# Execution-capable Migration Pack for the Postgres retail estate (Deploy
+# & Harden Phase 3a, docs/adr/0003-async-data-plane-job.md).
+#
+# A NEW, separate pack — not an in-place edit of packs/postgres_retail_v1's
+# default_mode. That pack is a versioned artifact; flipping its mode in
+# place would retroactively change what every assessment already run
+# against v1.0.0 claimed to have proven (assessment-only). This pack
+# targets the SAME estate/source (postgres_retail_v1's whole point was
+# proving that pack-driven config change, not agent code change, is what
+# onboarding looks like — that stays true here too), but is its own
+# versioned artifact with its own provenance and its own contract tests.
+#
+# Execution compatibility: tools/adapters/postgres_adapter.py already
+# declares transfer+reconcile capabilities (confirmed independently
+# during Deploy & Harden's audit — verified, not assumed) — this pack
+# is what actually turns that on, via default_mode: execution.
+# tools/pack_loader.py::supports_execution() gates on exactly this.
+
+pack_id: postgres_retail_exec_v1
+version: "1.0.0"
+display_name: "Retail (PostgreSQL) — execution-capable, v1"
+
+# Upgrade provenance: what this is derived from, and why it's a new
+# pack rather than a bump of the original.
+derived_from: postgres_retail_v1
+derived_from_version: "1.0.0"
+upgrade_rationale: >
+  postgres_retail_v1 is deliberately assessment-only (§32.5's adoption
+  principle: production-write access should never be a prerequisite for
+  discovering an estate). This pack proves the SAME estate can also be
+  executed against, once an operator explicitly opts in — a separate,
+  additive artifact rather than silently reinterpreting what the
+  original pack's assessment runs already claimed.
+
+# Same source binding requirements as postgres_retail_v1 — same estate,
+# same source_id. An execution-capable pack does not get to invent a
+# new connection story; it inherits the one already onboarded.
+estate_file: config/estates/retail-postgres.yaml
+source_id: retail-postgres
+
+classification_rules: policies/data_classification.yaml
+dialect_notes: null
+lineage_sql_corpus_path: null
+
+# The one substantive change from postgres_retail_v1.
+default_mode: execution
+
+# Target mapping: no scheduled_tables, deliberately — derived from the
+# discovered catalog at plan time, the same "real customer's path"
+# postgres_retail_v1's own comment already argues for. An execution pack
+# proving it can run the full lifecycle without also proving catalog-
+# derived target resolution would be proving a narrower thing than it
+# claims to.
+scheduled_tables: []
+
+# Reconciliation rules: identical numeric type_rules to postgres_retail_v1
+# — PostgresAdapter.source_facts() already reconciles row_count/numeric_sum/
+# null_count/keys against BigQuery target facts the same way regardless of
+# which pack selected the table (tools/reconciliation.py takes a
+# MigrationTarget, not a pack).
+type_rules:
+  scalar_safe:
+    [smallint, integer, bigint, numeric, real, double precision,
+     boolean, character varying, character, text, uuid,
+     date, "timestamp without time zone", "timestamp with time zone"]
+  stringify_via_method: []
+  excluded: [bytea, json, jsonb, ARRAY, USER-DEFINED]
+  numeric: [smallint, integer, bigint, numeric, real, double precision]
+
+# Policy defaults: this pack does not loosen or add to
+# policies/agent_permissions.yaml — an execution-capable pack still runs
+# under the same discovery/planner/validation/cutover policy ceilings as
+# every other source family. Stated explicitly so "execution-capable"
+# is never mistaken for "policy-exempt."
+policy_notes: >
+  No pack-specific policy overrides. Discovery, Planner, Validation and
+  Cutover enforce the same policies/agent_permissions.yaml ceilings
+  against this pack's runs as against every other pack's.
+
+target_dataset: null

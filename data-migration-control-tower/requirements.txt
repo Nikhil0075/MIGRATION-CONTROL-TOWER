@@ -34,6 +34,11 @@ google-cloud-secret-manager>=2.20.0
 # runs everything else; that one script prints a clear "pip install"
 # message instead of failing at import time.
 google-cloud-billing-budgets>=1.13
+# Cloud Run Jobs submission (Deploy & Harden Phase 3). Imported lazily in
+# tools/data_plane_executors/cloud_run_job_executor.py — same Rung-2
+# pattern; InMemoryExecutor (the default DataPlaneExecutor everywhere
+# else) never touches this package.
+google-cloud-run>=0.10
 
 # Agent framework and the supported unified Gemini SDK. Deterministic tools
 # remain callable when ADK is unavailable; model-required V2 stages fail

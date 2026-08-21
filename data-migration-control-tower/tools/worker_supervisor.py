@@ -424,6 +424,12 @@ def default_specs() -> list[ConsumerSpec]:
         # NOT validation-passed-sub. advance_through_validation consumes it
         # as an assertion; stealing it breaks make run / make harness /
         # evaluation/scenarios.py whenever the console is up.
+        # Deploy & Harden Phase 3 (docs/adr/0003) — the async data-plane
+        # job's completion event. A no-op consumer unless
+        # DATA_PLANE_EXECUTOR=cloud_run_job is set (handle_planned()'s own
+        # gate); harmless to always register, matching how every other
+        # consumer here is unconditional.
+        ConsumerSpec("migration_completed", orch.MIGRATION_COMPLETED_SUB, orch.handle_migration_completed),
     ]
 
 

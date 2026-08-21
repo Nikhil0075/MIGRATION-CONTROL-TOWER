@@ -142,7 +142,7 @@ TOPICS=(
   "plan.created"
   "plan.approved"         # reserved, unused — see comment above
   "validation.requested"
-  "migration.completed"   # reserved, unused — see comment above
+  "migration.completed"   # Deploy & Harden Phase 3, docs/adr/0003 — async data-plane job completion, no longer unused
   "validation.failed"
   "validation.passed"
   "cutover.approved"      # authenticated console approval command
@@ -178,6 +178,8 @@ declare -A SUBSCRIPTIONS=(
   ["validation-failed-sub"]="validation.failed"
   ["assessment-requested-sub"]="assessment.requested"
   ["cutover-approved-sub"]="cutover.approved"
+  # Deploy & Harden Phase 3, docs/adr/0003 — the async data-plane job's completion event.
+  ["migration-completed-sub"]="migration.completed"
   # Without this the dead-letter topic is a black hole: messages land
   # there, no subscription retains them, and they are dropped. That is
   # worse than no dead-lettering, because you believe you captured them.

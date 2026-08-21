@@ -60,8 +60,11 @@ apply blindly.
    Then apply the read-only-user SQL migration referenced in `cloud_sql.tf`'s comment (Cloud SQL's
    own user resource has no built-in read-only role — the actual `REVOKE`/`GRANT SELECT` statements
    are a separate `psql` step, not Terraform).
-6. Only once a data-plane job image is built: `enable_data_plane_job = true` (Phase 3 — this
-   resource isn't defined in this module yet; added when Phase 3 lands).
+6. Only once a data-plane job image is built (`docker build -f tools/data_plane_job/Dockerfile .`,
+   pushed to the Artifact Registry repo this module created): set `data_plane_job_image_tag` and
+   `enable_data_plane_job = true` (`data_plane_job.tf`). The job's own service account
+   (`sa-data-plane-job`) is created whenever either `enable_data_plane_job` or `enable_cloud_sql`
+   is true, so it exists before the job needs it.
 
 ## Direct VPC egress note (Cloud SQL)
 

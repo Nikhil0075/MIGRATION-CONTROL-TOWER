@@ -59,7 +59,7 @@ variable "pubsub_topics" {
     "validation.failed", "validation.passed", "cutover.approved", "cutover.completed",
     "assessment.requested", "wave.override.requested",
   ]
-  description = "Matches infrastructure/gcp_setup.sh's TOPICS array (docs/ARCHITECTURE.md) — kept in sync by hand until gcp_setup.sh is retired in favor of this module."
+  description = "Matches infrastructure/gcp_setup.sh's TOPICS array (docs/ARCHITECTURE.md) — kept in sync by hand until gcp_setup.sh is retired in favor of this module. migration.completed is the Deploy & Harden Phase 3 async data-plane job completion event (docs/adr/0003), no longer 'reserved, unused' as gcp_setup.sh's comment once said."
 }
 
 variable "max_delivery_attempts" {

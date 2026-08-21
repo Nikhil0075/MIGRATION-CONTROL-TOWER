@@ -63,12 +63,17 @@ jobs:
         service:
           [control-tower-ui, orchestrator, discovery-agent, lineage-agent,
            risk-agent, planner-agent, validation-agent, cutover-agent,
-           finance-impact-agent]
+           finance-impact-agent, migration-data-plane]
         include:
           - service: control-tower-ui
             dockerfile: frontend/Dockerfile
           - service: orchestrator
             dockerfile: agents/orchestrator/Dockerfile
+          # migration-data-plane (Deploy & Harden Phase 3) is a Cloud Run
+          # JOB, not a Service — built/scanned here for parity with every
+          # other image, but has no `google_cloud_run_v2_service` deploy
+          # step below (see infrastructure/terraform/data_plane_job.tf's
+          # separate google_cloud_run_v2_job resource instead).
           - service: discovery-agent
             dockerfile: agents/discovery/Dockerfile
           - service: lineage-agent
@@ -83,6 +88,8 @@ jobs:
             dockerfile: agents/cutover/Dockerfile
           - service: finance-impact-agent
             dockerfile: agents/finance/Dockerfile
+          - service: migration-data-plane
+            dockerfile: tools/data_plane_job/Dockerfile
     outputs:
       digest-control-tower-ui: ${{ steps.digest.outputs.digest }}
     permissions:

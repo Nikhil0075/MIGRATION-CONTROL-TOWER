@@ -210,3 +210,64 @@ def test_in_memory_executor_still_truncates_on_zero_rows(monkeypatch):
     total = InMemoryExecutor().load("some_table", iter([]), batch_size=100)
     assert total == 0
     assert calls == [("some_table", 0, True, None)]
+
+
+# ---------------------------------------------------------------------------
+# execute_remote() short-circuit (Deploy & Harden Phase 3, docs/adr/0003)
+# ---------------------------------------------------------------------------
+
+
+class _RemoteExecutor(DataPlaneExecutor):
+    """A fake executor that runs "elsewhere" — its execute_remote()
+    returns a PENDING manifest instead of None, so
+    execute_migration()'s row-fetching/counting must never run for it."""
+
+    def __init__(self, manifest: dict):
+        self._manifest = manifest
+        self.execute_remote_called_with: dict | None = None
+
+    def load(self, target_table, rows, batch_size):
+        raise AssertionError("load() must never be called when execute_remote() short-circuits")
+
+    def execute_remote(self, *, run_id, execution_id, target, binding):
+        self.execute_remote_called_with = {
+            "run_id": run_id, "execution_id": execution_id, "target": target, "binding": binding,
+        }
+        return self._manifest
+
+
+def test_an_executor_that_returns_non_none_from_execute_remote_short_circuits(monkeypatch):
+    """Neither _count_rows() nor fetch_source_rows() — both SQL-Server-
+    specific — may run when execute_remote() handles the call instead."""
+    import tools.migration_executor as me
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("SQL-Server-specific row fetching must not run for a remote executor")
+
+    monkeypatch.setattr(me, "_count_rows", _explode)
+    monkeypatch.setattr(me, "fetch_source_rows", _explode)
+
+    pending_manifest = {"execution_id": "exec-1", "status": "PENDING", "run_id": "run-1"}
+    remote = _RemoteExecutor(pending_manifest)
+
+    target = {
+        "source_schema": "public", "source_table": "orders", "target_table": "orders_dim",
+        "key_column": "order_id",
+    }
+    result = execute_migration(run_id="run-1", target=target, data_plane=remote, binding="fake-binding")
+
+    assert result == pending_manifest
+    assert remote.execute_remote_called_with["run_id"] == "run-1"
+    assert remote.execute_remote_called_with["target"] == target
+    assert remote.execute_remote_called_with["binding"] == "fake-binding"
+
+
+def test_in_memory_executor_never_short_circuits(monkeypatch):
+    """The default executor's inherited execute_remote() returns None,
+    so it must never be mistaken for a remote manifest — a regression
+    guard for the short-circuit's `if remote_manifest is not None` check
+    specifically (a naive `if remote_manifest:` would treat an empty
+    dict the same as None, which is a real, easy mistake to make here)."""
+    assert InMemoryExecutor().execute_remote(
+        run_id="run-1", execution_id="exec-1", target={}, binding=None
+    ) is None

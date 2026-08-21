@@ -79,6 +79,12 @@ VALIDATION_REQUESTED_SUB = "validation-requested-sub"
 VALIDATION_PASSED_SUB = "validation-passed-sub"
 APPROVAL_PREPARATION_SUB = "approval-preparation-sub"
 VALIDATION_FAILED_SUB = "validation-failed-sub"
+# Deploy & Harden Phase 3 (docs/adr/0003) — the async data-plane job's
+# completion event. Not consumed by tools/worker_supervisor.py's default
+# specs unless explicitly added there; wired here so handle_planned()'s
+# async branch and handle_migration_completed() are usable independent
+# of which subscriptions a given deployment actually pulls.
+MIGRATION_COMPLETED_SUB = "migration-completed-sub"
 
 ORACLE_CORPUS_PATH = "simulator/source_setup/oracle_dialect_corpus"
 DAG_ARTIFACTS_PATH = "simulator/source_setup/dags"
@@ -574,6 +580,28 @@ def handle_risk_assessed(payload: dict) -> dict:
     return plan
 
 
+def _select_data_plane_executor():
+    """Deploy & Harden Phase 3 (docs/adr/0003): opt-in, via
+    DATA_PLANE_EXECUTOR=cloud_run_job — unset (the default everywhere
+    today) means None, and execute_migration() falls back to
+    InMemoryExecutor exactly as it always has. This is the ONE place
+    that decides; handle_planned() below just asks.
+    """
+    import os
+
+    if os.environ.get("DATA_PLANE_EXECUTOR") == "cloud_run_job":
+        from tools.data_plane_executors.cloud_run_job_executor import CloudRunJobExecutor
+
+        return CloudRunJobExecutor()
+    return None
+
+
+def _set_pending_executions(run_id: str, count: int) -> None:
+    get_client().collection("migration_runs").document(run_id).set(
+        {"pending_remote_executions": count}, merge=True
+    )
+
+
 def handle_planned(payload: dict) -> dict:
     """Consumes plan.created: executes the migration (PLANNED -> MIGRATING
     -> VALIDATING), then publishes validation.requested. Returns the
@@ -660,9 +688,25 @@ def handle_planned(payload: dict) -> dict:
         run_id, wave_key, risk_class, len(targets),
     )
 
+    data_plane = _select_data_plane_executor()
+    is_async = data_plane is not None  # today, only CloudRunJobExecutor is ever selected here
+
+    # KNOWN LIMITATION (Deploy & Harden Phase 3, stated rather than
+    # hidden): the wave slot is still released in this function's
+    # `finally` below regardless of sync/async — for the async path that
+    # means the concurrency slot frees up as soon as jobs are SUBMITTED,
+    # not once they actually COMPLETE. Wave Manager's admission control
+    # is therefore not yet accounting for in-flight remote work. Fixing
+    # this needs the slot release to move into handle_migration_completed
+    # too, which needs its own careful design (a slot released twice, or
+    # never, is worse than the current honestly-limited behavior) — left
+    # as explicit follow-up, not silently shipped as if solved.
     try:
         with tracing.span("handle_planned", run_id=run_id, drop_fraction=drop_fraction):
             transition_state(run_id, "MIGRATING")
+
+            if is_async:
+                _set_pending_executions(run_id, len(targets))
 
             executions = []
             for target in targets:
@@ -678,8 +722,31 @@ def handle_planned(payload: dict) -> dict:
                         target=target,
                         binding=binding,
                         drop_fraction=drop_fraction,
+                        data_plane=data_plane,
                     )
                 )
+
+            if is_async:
+                # Do NOT transition to VALIDATING or publish
+                # validation.requested here — every execution above only
+                # returned a PENDING manifest (tools/migration_executor.py's
+                # execute_remote() short-circuit). handle_migration_completed
+                # does both, once every submitted job has reported in via
+                # migration.completed (Deploy & Harden Phase 3,
+                # docs/adr/0003).
+                manifest = {
+                    "run_id": run_id,
+                    "async": True,
+                    "submitted_executions": len(executions),
+                    "executions": executions,
+                }
+                logger.info(
+                    "plan.created -> %d target(s) submitted to the async data-plane executor for "
+                    "run %s — staying in MIGRATING until migration.completed events arrive",
+                    len(executions), run_id,
+                )
+                _dedup_complete(payload, "handle_planned", manifest)
+                return manifest
 
             # Aggregate sums, not the last target's figures: the Overview
             # page's migrated_percent (frontend/api_v1.py) and
@@ -726,6 +793,120 @@ def handle_planned(payload: dict) -> dict:
         wave_manager.release_slot(wave_key, run_id)
 
     _dedup_complete(payload, "handle_planned", manifest)
+    return manifest
+
+
+def _decrement_pending_executions(run_id: str) -> int:
+    """Atomically decrements migration_runs/{run_id}'s
+    pending_remote_executions counter and returns the new value.
+
+    A transaction, not a bare read-then-write: two migration.completed
+    events for the same run can arrive close together (Cloud Run Job
+    executions finishing around the same time), and a non-atomic
+    decrement would let both read the same starting value and both
+    compute one-less, undercounting how many are actually still
+    outstanding — exactly the race tools/idempotency.py's claim/complete
+    pattern exists to prevent for a different kind of counter.
+    """
+    doc_ref = get_client().collection("migration_runs").document(run_id)
+
+    @firestore.transactional
+    def _txn(transaction: firestore.Transaction) -> int:
+        snapshot = doc_ref.get(transaction=transaction)
+        current = int((snapshot.to_dict() or {}).get("pending_remote_executions", 0))
+        remaining = max(0, current - 1)
+        transaction.set(doc_ref, {"pending_remote_executions": remaining}, merge=True)
+        return remaining
+
+    return _txn(get_client().transaction())
+
+
+def _read_all_executions(run_id: str) -> list[dict]:
+    docs = (
+        get_client()
+        .collection("migration_runs")
+        .document(run_id)
+        .collection("migration_executions")
+        .stream()
+    )
+    return sorted((d.to_dict() for d in docs), key=lambda e: e.get("started_at") or "")
+
+
+def handle_migration_completed(payload: dict) -> dict:
+    """Consumes migration.completed — the async data-plane job's
+    completion event (Deploy & Harden Phase 3, docs/adr/0003-async-data-
+    plane-job.md). The event-driven mirror of handle_planned()'s
+    synchronous local aggregation: once every remote execution submitted
+    for a run's migration wave has reported in, aggregates their
+    manifests the same way, transitions MIGRATING -> VALIDATING, and
+    publishes validation.requested.
+
+    A FAILED execution still counts toward "reported in" and still
+    lands the run in VALIDATING, not a direct FAILED transition —
+    run_lifecycle.py's canonical graph has no MIGRATING -> FAILED edge,
+    and inventing one here would duplicate what Validation's own
+    reconciliation already does correctly: a missing/incomplete target
+    table fails reconciliation through the existing, tested
+    VALIDATING -> FAILED path, entering the same investigate/remediate
+    loop a synchronous failure would never have reached either (today's
+    synchronous path raises out of execute_migration() instead, which
+    is a genuinely different failure mode — see this function's ADR for
+    why the two aren't unified in this phase).
+    """
+    status, cached = _dedup_claim(payload, "handle_migration_completed")
+    if status == "done":
+        return cached
+
+    run_id = payload["run_id"]
+    execution_id = payload.get("execution_id")
+
+    with tracing.span("handle_migration_completed", run_id=run_id, execution_id=execution_id):
+        remaining = _decrement_pending_executions(run_id)
+        logger.info(
+            "migration.completed: run=%s execution=%s status=%s (%d execution(s) still pending)",
+            run_id, execution_id, payload.get("status"), remaining,
+        )
+
+        if remaining > 0:
+            result = {"run_id": run_id, "execution_id": execution_id, "still_pending": remaining}
+            _dedup_complete(payload, "handle_migration_completed", result)
+            return result
+
+        executions = _read_all_executions(run_id)
+        manifest = {
+            **(executions[-1] if executions else {}),
+            "executions": executions,
+            "target_count": sum(e.get("target_count") or 0 for e in executions),
+            "source_count": sum(e.get("source_count") or 0 for e in executions),
+            "dropped_count": sum(e.get("dropped_count") or 0 for e in executions),
+            "targets_migrated": len(executions),
+        }
+
+        transition_state(run_id, "VALIDATING")
+        agent_audit.append_deterministic(
+            run_id,
+            agent_id="migration-tools",
+            capability="migration.execute.plan_targets",
+            stage="MIGRATING",
+            output_summary=(
+                f"{len(executions)} remote data-plane execution(s) reported in; loaded "
+                f"{manifest['target_count']} of {manifest['source_count']} source rows."
+            ),
+            evidence_refs=[str(e.get("target_table")) for e in executions if e.get("target_table")],
+            tool_calls=[
+                {"tool": "cloud_run_job_executor.execute_remote", "status": "COMPLETED"},
+                {"tool": "run.transition_state", "status": "VALIDATING"},
+            ],
+            generated_output=manifest,
+            idempotency_ref=str(payload.get("_pubsub_message_id") or "migration-completed"),
+        )
+        publish("validation.requested", {"run_id": run_id})
+        logger.info(
+            "migration.completed: all %d execution(s) in for run %s -> VALIDATING",
+            len(executions), run_id,
+        )
+
+    _dedup_complete(payload, "handle_migration_completed", manifest)
     return manifest
 
 

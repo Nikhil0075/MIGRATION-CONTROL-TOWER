@@ -98,15 +98,23 @@ As of Deploy & Harden Phase 1a, every `invoke_capability()` call also passes thr
 capability-dispatch policy gate — see `docs/GOVERNANCE.md` for the full two-layer enforcement model
 this project uses (coarse dispatch-level gate + fine-grained tool-level checks).
 
-## The data plane: `InMemoryExecutor` today, an async job executor coming
+## The data plane: `InMemoryExecutor` by default, `CloudRunJobExecutor` opt-in
 
-`tools/migration_executor.py::DataPlaneExecutor` is an abstract interface; `InMemoryExecutor` is
-the only implementation today, and its own docstring says plainly it streams rows through the
-orchestrator's own process memory — not a managed service. Deploy & Harden Phase 3
-(`docs/adr/0003-async-data-plane-job.md`) adds a second, additive implementation
-(`CloudRunJobExecutor`) that submits a genuinely separately-deployed Cloud Run Job and resumes the
-lifecycle via a `migration.completed` event rather than polling — `InMemoryExecutor` stays the
-default everywhere else (local dev, tests, the existing SQL Server/WWI path).
+`tools/migration_executor.py::DataPlaneExecutor` is an abstract interface. `InMemoryExecutor`
+streams rows through the orchestrator's own process memory — not a managed service, and its own
+docstring says so plainly; it remains the default everywhere (local dev, tests, the WWI/SQL Server
+path — nothing about its behavior changed in Phase 3).
+
+`CloudRunJobExecutor` (Deploy & Harden Phase 3, `docs/adr/0003-async-data-plane-job.md`) is a
+second, additive implementation, selected only when `DATA_PLANE_EXECUTOR=cloud_run_job` is set: it
+submits a genuinely separately-deployed Cloud Run Job (`tools/data_plane_job/run_job.py`, its own
+narrowly-scoped service account) and returns immediately rather than blocking — the job writes its
+result and publishes `migration.completed`, which a new orchestrator consumer
+(`handle_migration_completed`) consumes to resume the lifecycle. `agents/orchestrator/orchestrator.py::
+handle_planned()` gained a conditional branch for this (unset env var = today's synchronous
+behavior, byte-for-byte unchanged). Implemented and tested; not yet deployed live — needs
+`infrastructure/terraform`'s `enable_data_plane_job` and `enable_cloud_sql` (both `false` by
+default) and a real Cloud SQL for PostgreSQL instance to point at.
 
 ## Target shape (Deploy & Harden Phase 2)
 

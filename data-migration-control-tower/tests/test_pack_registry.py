@@ -33,6 +33,8 @@ from tools.pack_loader import (
 
 WWI = "wwi_sqlserver_v1"
 ORACLE = "oracle_corpus_v1"
+POSTGRES_ASSESSMENT = "postgres_retail_v1"
+POSTGRES_EXEC = "postgres_retail_exec_v1"
 
 
 def _minimal_pack(**overrides) -> dict:
@@ -118,6 +120,51 @@ def test_execution_support_no_longer_depends_on_a_hardcoded_source_id():
 
 def test_assessment_only_pack_is_not_executable_even_with_a_capable_adapter():
     assert supports_execution(_minimal_pack(default_mode=MODE_ASSESSMENT)) is False
+
+
+# ---------------------------------------------------------------------------
+# postgres_retail_exec_v1 — the new immutable execution-capable pack
+# (Deploy & Harden Phase 3a, docs/adr/0003)
+# ---------------------------------------------------------------------------
+
+
+def test_postgres_exec_pack_loads_and_validates():
+    packs = list_packs()
+    assert POSTGRES_EXEC in {p["pack_id"] for p in packs}
+
+
+def test_postgres_exec_pack_is_execution_capable():
+    """PostgresAdapter already declares transfer+reconcile — this pack's
+    default_mode=execution is what actually turns that on
+    (tools/pack_loader.py::supports_execution())."""
+    assert supports_execution(get_pack(POSTGRES_EXEC)) is True
+
+
+def test_original_postgres_assessment_pack_is_unaffected():
+    """The whole point of a NEW pack rather than an in-place edit — this
+    must still read exactly as it did before postgres_retail_exec_v1
+    existed."""
+    assert supports_execution(get_pack(POSTGRES_ASSESSMENT)) is False
+    assert default_mode(get_pack(POSTGRES_ASSESSMENT)) == MODE_ASSESSMENT
+
+
+def test_postgres_exec_pack_targets_the_same_estate_and_source_as_the_assessment_pack():
+    """An execution-capable pack does not get to invent a new connection
+    story — it inherits the one already onboarded."""
+    exec_pack = get_pack(POSTGRES_EXEC)
+    assessment_pack = get_pack(POSTGRES_ASSESSMENT)
+    assert exec_pack["estate_file"] == assessment_pack["estate_file"]
+    assert exec_pack["source_id"] == assessment_pack["source_id"]
+
+
+def test_postgres_exec_pack_derives_targets_from_the_catalog_not_hardcoded():
+    assert scheduled_tables(get_pack(POSTGRES_EXEC)) == []
+
+
+def test_postgres_exec_pack_declares_its_upgrade_provenance():
+    pack = get_pack(POSTGRES_EXEC)
+    assert pack.get("derived_from") == POSTGRES_ASSESSMENT
+    assert pack.get("upgrade_rationale")
 
 
 # ---------------------------------------------------------------------------

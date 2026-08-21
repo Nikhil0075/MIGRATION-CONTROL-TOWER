@@ -49,6 +49,9 @@ locals {
     # consumer here — advance_through_validation's assertion-only
     # subscription is test/eval scoped, not part of the deployed
     # topology (see tools/worker_supervisor.py's own docstring on this).
+    # Deploy & Harden Phase 3 (docs/adr/0003) — the async data-plane
+    # job's completion event.
+    "migration-completed-sub"       = "migration.completed"
   }
 }
 
@@ -93,6 +96,10 @@ locals {
     "validation-failed-push"    = { topic = "validation.failed", service = "orchestrator", path = "/push/recovery" }
     "assessment-requested-push" = { topic = "assessment.requested", service = "discovery-agent", path = "/push/assessment" }
     "cutover-approved-push"     = { topic = "cutover.approved", service = "cutover-agent", path = "/push/cutover" }
+    # Deploy & Harden Phase 3 (docs/adr/0003) — the async data-plane
+    # job's completion event, owned by the orchestrator like its other
+    # 6 state-machine-step consumers.
+    "migration-completed-push"  = { topic = "migration.completed", service = "orchestrator", path = "/push/migrationcompleted" }
   }
 }
 

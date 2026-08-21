@@ -46,6 +46,9 @@ _CONSUMERS = {
     "validation": orch.handle_validation_requested,
     "approval": orch.handle_validation_passed,
     "recovery": orch.handle_validation_failed,
+    # Deploy & Harden Phase 3 (docs/adr/0003) — the async data-plane job's
+    # completion event.
+    "migrationcompleted": orch.handle_migration_completed,
 }
 
 for _name, _handler in _CONSUMERS.items():

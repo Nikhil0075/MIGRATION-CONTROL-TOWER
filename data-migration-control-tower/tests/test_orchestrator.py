@@ -462,6 +462,144 @@ def test_handle_planned_refuses_to_execute_for_an_assessment_mode_run():
         delete_run(run_id)
 
 
+# --- Async data-plane executor flow (Deploy & Harden Phase 3, docs/adr/0003) ---
+
+
+@skip_if_no_firestore
+def test_handle_planned_async_branch_submits_and_stays_in_migrating(monkeypatch):
+    """When _select_data_plane_executor() returns a remote executor,
+    handle_planned() must submit every target and stop — NOT transition
+    to VALIDATING or publish validation.requested. That's
+    handle_migration_completed's job, once every submitted execution
+    reports in."""
+    from agents.orchestrator.run_lifecycle import create_run, delete_run, get_run, transition_state
+
+    run_id = create_run("test.orchestrator.async_planned", drop_fraction=0.0)
+    targets = [
+        {
+            "target_id": "t1", "source_schema": "public", "source_table": "orders",
+            "target_table": "orders_dim", "key_column": "id", "order_by": "id",
+            "scheduled": True, "blocked": False,
+        },
+        {
+            "target_id": "t2", "source_schema": "public", "source_table": "customers",
+            "target_table": "customers_dim", "key_column": "id", "order_by": "id",
+            "scheduled": True, "blocked": False,
+        },
+    ]
+    publish_calls = []
+    execute_calls = []
+    try:
+        for state in ("DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED"):
+            transition_state(run_id, state)
+        seed_migration_plan(run_id, targets=targets)
+
+        sentinel_executor = object()
+        monkeypatch.setattr(orchestrator, "_select_data_plane_executor", lambda: sentinel_executor)
+
+        def fake_execute_migration(*, run_id, target, binding, drop_fraction, data_plane=None):
+            assert data_plane is sentinel_executor  # threaded through correctly
+            execute_calls.append(target["target_id"])
+            return {"execution_id": f"exec-{target['target_id']}", "status": "PENDING", "run_id": run_id}
+
+        monkeypatch.setattr(orchestrator, "execute_migration", fake_execute_migration)
+        monkeypatch.setattr(orchestrator, "publish", lambda topic, payload: publish_calls.append((topic, payload)))
+
+        result = orchestrator.handle_planned({"run_id": run_id})
+
+        assert result["async"] is True
+        assert result["submitted_executions"] == 2
+        assert len(execute_calls) == 2
+        assert get_run(run_id)["state"] == "MIGRATING"  # NOT VALIDATING
+        assert ("validation.requested", {"run_id": run_id}) not in publish_calls
+        assert get_run(run_id).get("pending_remote_executions") == 2
+    finally:
+        delete_run(run_id)
+
+
+@skip_if_no_firestore
+def test_handle_migration_completed_waits_for_every_pending_execution(monkeypatch):
+    """Two submitted executions -> the run must stay in MIGRATING after
+    only the first migration.completed arrives, and only transition to
+    VALIDATING once the second one does too."""
+    from agents.orchestrator.run_lifecycle import create_run, delete_run, get_run, transition_state
+
+    run_id = create_run("test.orchestrator.migration_completed", drop_fraction=0.0)
+    publish_calls = []
+    try:
+        for state in ("DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED", "MIGRATING"):
+            transition_state(run_id, state)
+        orchestrator._set_pending_executions(run_id, 2)
+
+        client = get_client_for_test()
+        executions_ref = client.collection("migration_runs").document(run_id).collection("migration_executions")
+        for i, exec_id in enumerate(["exec-a", "exec-b"]):
+            executions_ref.document(exec_id).set({
+                "execution_id": exec_id, "status": "COMPLETED", "target_count": 10 + i,
+                "source_count": 10 + i, "target_table": f"table_{i}", "started_at": f"2026-01-01T00:0{i}:00+00:00",
+            })
+
+        monkeypatch.setattr(orchestrator, "publish", lambda topic, payload: publish_calls.append((topic, payload)))
+
+        first = orchestrator.handle_migration_completed(
+            {"run_id": run_id, "execution_id": "exec-a", "status": "COMPLETED", "_pubsub_message_id": "msg-a"}
+        )
+        assert first["still_pending"] == 1
+        assert get_run(run_id)["state"] == "MIGRATING"
+        assert publish_calls == []
+
+        second = orchestrator.handle_migration_completed(
+            {"run_id": run_id, "execution_id": "exec-b", "status": "COMPLETED", "_pubsub_message_id": "msg-b"}
+        )
+        assert second["targets_migrated"] == 2
+        assert second["target_count"] == 10 + 11  # aggregated, not the last execution's alone
+        assert get_run(run_id)["state"] == "VALIDATING"
+        assert ("validation.requested", {"run_id": run_id}) in publish_calls
+    finally:
+        delete_run(run_id)
+        for exec_id in ("exec-a", "exec-b"):
+            get_client_for_test().collection("migration_runs").document(run_id).collection(
+                "migration_executions"
+            ).document(exec_id).delete()
+        for msg_id in ("msg-a", "msg-b"):
+            get_client_for_test().collection("processed_messages").document(
+                f"handle_migration_completed:{msg_id}"
+            ).delete()
+
+
+@skip_if_no_firestore
+def test_handle_migration_completed_is_idempotent_on_message_redelivery(monkeypatch):
+    from agents.orchestrator.run_lifecycle import create_run, delete_run, transition_state
+
+    run_id = create_run("test.orchestrator.migration_completed_dedup", drop_fraction=0.0)
+    message_id = f"test-{uuid.uuid4().hex}"
+    payload = {"run_id": run_id, "execution_id": "exec-only", "status": "COMPLETED", "_pubsub_message_id": message_id}
+    try:
+        for state in ("DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED", "MIGRATING"):
+            transition_state(run_id, state)
+        orchestrator._set_pending_executions(run_id, 1)
+        client = get_client_for_test()
+        client.collection("migration_runs").document(run_id).collection("migration_executions").document(
+            "exec-only"
+        ).set({"execution_id": "exec-only", "status": "COMPLETED", "target_count": 5, "source_count": 5, "started_at": "2026-01-01T00:00:00+00:00"})
+        monkeypatch.setattr(orchestrator, "publish", lambda topic, payload: None)
+
+        first = orchestrator.handle_migration_completed(payload)
+        second = orchestrator.handle_migration_completed(payload)  # simulated redelivery
+
+        assert not first.get("deduped")
+        assert second.get("deduped") is True
+        assert second["target_count"] == first["target_count"]
+    finally:
+        delete_run(run_id)
+        get_client_for_test().collection("migration_runs").document(run_id).collection(
+            "migration_executions"
+        ).document("exec-only").delete()
+        get_client_for_test().collection("processed_messages").document(
+            f"handle_migration_completed:{message_id}"
+        ).delete()
+
+
 # --- Pub/Sub ack/nack semantics (real defect: pull() used to auto-ack) ---
 
 

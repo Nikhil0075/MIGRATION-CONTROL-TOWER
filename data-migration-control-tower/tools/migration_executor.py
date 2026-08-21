@@ -155,18 +155,50 @@ class DataPlaneExecutor(abc.ABC):
     """Boundary between "decide what to move" (deterministic, this
     module's own code) and "actually move the bytes" (Day 10 Phase 4,
     master doc §32.12's control-plane/data-plane split). InMemoryExecutor
-    below is today's only implementation — a documented Rung-2
-    substitution for a future DataflowExecutor/JDBC-delegated one,
-    exactly the same discipline this project already applies to Gemma
-    and Model Armor: the interface is real, the production-grade
-    implementation behind it isn't, and that's said outright rather than
-    silently implied.
+    below streams rows through THIS process's memory — genuinely batched,
+    but not a separately-deployed service. tools/data_plane_executors/
+    cloud_run_job_executor.py::CloudRunJobExecutor (Deploy & Harden
+    Phase 3, docs/adr/0003-async-data-plane-job.md) is the first
+    implementation that genuinely runs elsewhere.
     """
 
     @abc.abstractmethod
     def load(self, target_table: str, rows: Iterator[dict], batch_size: int) -> int:
         """Loads rows into target_table, streaming in batches. Returns
         the total row count loaded."""
+
+    def execute_remote(
+        self,
+        *,
+        run_id: str,
+        execution_id: str,
+        target: dict,
+        binding,
+    ) -> dict | None:
+        """Optional: submits this execution to run somewhere else
+        entirely and returns immediately with a PENDING manifest,
+        WITHOUT fetching/counting rows in this process — the whole
+        point being that this process (the orchestrator) may have no
+        network path to the source at all (see docs/ARCHITECTURE.md's
+        "on-prem network reachability" note).
+
+        Returns None (the default, inherited by InMemoryExecutor and
+        every executor that doesn't override this) to mean "not
+        supported — use load() via the normal synchronous path
+        instead." execute_migration() below checks this FIRST, before
+        doing any of its own row-fetching/counting work, so an executor
+        that returns non-None here never has fetch_source_rows() or
+        _count_rows() called against it at all — those are SQL-Server-
+        specific today and would be actively wrong to call for, say, a
+        Postgres-sourced remote execution.
+
+        Completion is NOT synchronous: the caller must not assume
+        target_count/status in the returned manifest are final — see
+        CloudRunJobExecutor's docstring for the actual completion event
+        flow (a migration.completed Pub/Sub event, handled by
+        agents/orchestrator/orchestrator.py::handle_migration_completed).
+        """
+        return None
 
 
 class InMemoryExecutor(DataPlaneExecutor):
@@ -264,6 +296,22 @@ def execute_migration(
 
     data_plane = data_plane or InMemoryExecutor()
     execution_id = str(uuid.uuid4())
+
+    # Deploy & Harden Phase 3 (docs/adr/0003): an executor that can run
+    # this migration somewhere else entirely gets first refusal, BEFORE
+    # any of this function's own SQL-Server-specific row-fetching/
+    # counting runs — _count_rows()/fetch_source_rows() below open a
+    # pyodbc connection unconditionally, which is actively wrong to do
+    # for, say, a Postgres-sourced remote execution the orchestrator may
+    # have no network path to anyway. See execute_remote()'s own
+    # docstring for what "PENDING manifest, completion via a
+    # migration.completed event" means for the caller.
+    remote_manifest = data_plane.execute_remote(
+        run_id=run_id, execution_id=execution_id, target=target or {}, binding=binding
+    )
+    if remote_manifest is not None:
+        return remote_manifest
+
     started_at = dt.datetime.now(dt.timezone.utc)
     source_count = _count_rows(source_schema, source_table, binding=binding)
 
