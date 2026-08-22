@@ -35,6 +35,27 @@ resource "google_project_iam_member" "data_plane_job_bigquery_editor" {
   member  = "serviceAccount:${google_service_account.data_plane_job[0].email}"
 }
 
+# Found missing live (2026-08-22): dataEditor grants write access to
+# tables/datasets, but does not include bigquery.jobs.create -- the
+# permission actually needed to START a load job in the first place.
+# BigQuery splits these deliberately (a role that lets you write data
+# is not automatically a role that lets you spend a project's query/
+# load-job quota), which is exactly the kind of least-privilege split
+# this whole deployment has been built around and exactly the kind of
+# gap that only a real load job against a real project surfaces --
+# every earlier attempt failed before ever reaching this line, for
+# other reasons (secret resolution, then IAM on the job resource
+# itself), so this Forbidden was never even visible until those were
+# fixed first. tools/bigquery_tools.py::load_json_rows() calls
+# client.load_table_from_json(), which is exactly this permission.
+resource "google_project_iam_member" "data_plane_job_bigquery_job_user" {
+  count = var.enable_data_plane_job || var.enable_cloud_sql ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.data_plane_job[0].email}"
+}
+
 resource "google_project_iam_member" "data_plane_job_pubsub_publisher" {
   count = var.enable_data_plane_job || var.enable_cloud_sql ? 1 : 0
 

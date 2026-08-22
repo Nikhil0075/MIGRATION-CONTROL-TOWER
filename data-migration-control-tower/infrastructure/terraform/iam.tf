@@ -90,11 +90,24 @@ resource "google_project_iam_member" "agent_cloudtrace_agent" {
 }
 
 # sa-orchestrator additionally gets pubsub.subscriber + bigquery.dataEditor
-# + aiplatform.user (it consumes every topic and, pre-Phase-2c dynamic
-# import, transitively needs what discovery/validation need too).
-
+# + bigquery.jobUser + aiplatform.user (it consumes every topic and,
+# pre-Phase-2c dynamic import, transitively needs what discovery/
+# validation need too). bigquery.jobUser found missing live
+# (2026-08-22): dataEditor alone lets a role write to a dataset once a
+# query job exists, but does not include bigquery.jobs.create -- the
+# separate permission needed to start one. Validation reconciliation
+# (agents/validation/agent.py -> tools/bigquery_tools.py::get_row_count)
+# runs in-process under sa-orchestrator, same as Discovery, and issues
+# real BigQuery queries; every reconciliation check failed with
+# Forbidden until this was added, having gotten all the way to
+# VALIDATING for the first time only because the data-plane job's own,
+# separate copy of this exact gap (see data_plane_job.tf) was just
+# fixed first.
 resource "google_project_iam_member" "orchestrator_extra" {
-  for_each = toset(["roles/pubsub.subscriber", "roles/bigquery.dataEditor", "roles/aiplatform.user"])
+  for_each = toset([
+    "roles/pubsub.subscriber", "roles/bigquery.dataEditor",
+    "roles/bigquery.jobUser", "roles/aiplatform.user",
+  ])
 
   project = var.project_id
   role    = each.value
@@ -126,5 +139,19 @@ resource "google_project_iam_member" "bigquery_editor_agents" {
 
   project = var.project_id
   role    = "roles/bigquery.dataEditor"
+  member  = "serviceAccount:${google_service_account.agent[each.value].email}"
+}
+
+# Kept alongside dataEditor above for these SAs' own identities too
+# (sa-validation, sa-cutover) even though today's in-process dispatch
+# means sa-orchestrator's own copy (above) is what actually matters
+# live -- once any of these flips to real cloud_run dispatch
+# (docs/adr/0002), it would hit the exact same missing-jobUser gap that
+# orchestrator_extra's own comment documents, silently, again.
+resource "google_project_iam_member" "bigquery_job_user_agents" {
+  for_each = toset(local.bigquery_editor_agent_sas)
+
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
   member  = "serviceAccount:${google_service_account.agent[each.value].email}"
 }
