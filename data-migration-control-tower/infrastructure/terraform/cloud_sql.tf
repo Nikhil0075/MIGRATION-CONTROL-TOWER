@@ -103,6 +103,22 @@ resource "google_secret_manager_secret_iam_member" "orchestrator_reads_postgres_
   member    = "serviceAccount:${google_service_account.agent["sa-orchestrator"].email}"
 }
 
+# sa-cutover reads this too -- unlike every other agent, Cutover genuinely
+# runs as its own deployed service (confirmed live 2026-08-22: cutover.
+# approved is processed by cutover-agent's own Cloud Run revision, under
+# sa-cutover's own identity), so it needs its own grant rather than
+# inheriting sa-orchestrator's. Post-cutover monitoring
+# (agents/cutover/agent.py::trigger_post_cutover_monitoring) resolves this
+# same secret to build a source adapter for its health check.
+resource "google_secret_manager_secret_iam_member" "cutover_reads_postgres_readonly_password" {
+  count = var.enable_cloud_sql ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.postgres_readonly_password[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.agent["sa-cutover"].email}"
+}
+
 # Bootstrap superuser credential (Deploy & Harden Phase 5 close-out) —
 # used exactly once, by tools/data_plane_job/bootstrap_retail_db.py via
 # the db_bootstrap job below, to create the retail schema/sample data

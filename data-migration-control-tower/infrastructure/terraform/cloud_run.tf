@@ -207,7 +207,19 @@ resource "google_cloud_run_v2_service" "service" {
     # outbound call (Firestore, Pub/Sub, BigQuery, every agent-to-agent
     # HTTP capability call) on the normal public-internet path.
     dynamic "vpc_access" {
-      for_each = each.key == "orchestrator" && var.enable_cloud_sql ? [1] : []
+      # cutover-agent added (2026-08-22): unlike Discovery/Lineage/Risk/
+      # Planner/Validation, Cutover genuinely runs as its own deployed
+      # service, not in-process under the orchestrator -- confirmed live
+      # the first time cutover.approved was ever processed: cutover-
+      # agent's OWN Cloud Run revision handled the push, under
+      # sa-cutover's own identity, not sa-orchestrator's. Post-cutover
+      # monitoring (agents/cutover/agent.py::trigger_post_cutover_
+      # monitoring) connects to the same Cloud SQL private IP Discovery
+      # does, so it needs the same direct VPC egress -- Cloud SQL has no
+      # public IP by design (cloud_sql.tf), so without this every
+      # connection attempt from cutover-agent's own network path would
+      # simply time out.
+      for_each = contains(["orchestrator", "cutover-agent"], each.key) && var.enable_cloud_sql ? [1] : []
       content {
         network_interfaces {
           network    = data.google_compute_network.default[0].id

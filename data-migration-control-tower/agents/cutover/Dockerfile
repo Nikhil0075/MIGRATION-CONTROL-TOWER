@@ -1,8 +1,19 @@
 # Cutover agent service (Deploy & Harden Phase 2b). Build context is the
-# REPO ROOT. Lean variant — Cutover writes to BigQuery via
-# tools/bigquery_tools.py (google-cloud-bigquery, pure Python client
-# library, no ODBC driver needed) rather than a live source connection,
-# so it doesn't need Discovery/Validation's unixODBC build step.
+# REPO ROOT.
+#
+# Originally believed lean (Cutover writes to BigQuery via
+# tools/bigquery_tools.py, no ODBC driver needed for its own direct
+# code) -- wrong in practice, found live the first time cutover.approved
+# was ever actually processed by this deployed service (2026-08-22,
+# Deploy & Harden async-data-plane-to-PASSED close-out):
+# trigger_post_cutover_monitoring() (agents/cutover/agent.py) imports
+# tools.adapters.build_adapter_for_binding, and tools/adapters/__init__.py
+# unconditionally imports every adapter submodule at module load time --
+# including dag_artifact_adapter, which imports tools/source_catalog.py,
+# which imports pyodbc unconditionally regardless of which adapter is
+# actually used. Same transitive-import gotcha agents/planner/Dockerfile
+# already had to work around; cutover-agent had simply never exercised
+# this import path in any run before this one.
 #
 #   gcloud run deploy cutover-agent --source . \
 #     --dockerfile agents/cutover/Dockerfile --region us-central1 \
@@ -11,6 +22,10 @@
 #     --set-env-vars GCP_PROJECT_ID=autonomous-data-migration
 
 FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      unixodbc unixodbc-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
