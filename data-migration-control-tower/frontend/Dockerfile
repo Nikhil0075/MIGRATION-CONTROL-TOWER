@@ -35,6 +35,17 @@ RUN npm run typecheck && npm run build
 
 FROM python:3.11-slim AS runtime
 
+# Discovered live (Deploy & Harden Phase 5 close-out): frontend/api_v1.py's
+# /api/v1/estates handler transitively imports tools.adapters (every
+# adapter, including dag_artifact_adapter -> tools.source_catalog ->
+# `import pyodbc`) via _catalog_system_for() — same class of bug as
+# agents/planner/Dockerfile's fix. pyodbc's native libodbc.so.2 is
+# required at import time even though the console itself never opens a
+# live SQL Server connection directly.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      unixodbc unixodbc-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt .
