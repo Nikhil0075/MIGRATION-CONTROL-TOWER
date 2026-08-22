@@ -362,16 +362,31 @@ def catalog_postgres_tables(conn, database: str, system: str = "postgres") -> li
             for name, data_type, nullable in cursor.fetchall()
         ]
 
+        # pg_catalog, not information_schema.table_constraints /
+        # key_column_usage: those two SQL-standard views gate visibility
+        # on has_table_privilege(oid, 'INSERT, UPDATE, DELETE, TRUNCATE,
+        # REFERENCES, TRIGGER') — SELECT is deliberately not in that list
+        # (confirmed by reading the live view definition via
+        # pg_get_viewdef, not assumed). A role granted only SELECT, which
+        # is exactly what a least-privilege migration_readonly account
+        # should be, sees zero rows from those views for every table it
+        # can otherwise read fine — every primary key on every table
+        # comes back empty, not just some. pg_catalog's own tables
+        # (pg_constraint, pg_class, pg_attribute) carry no such gate and
+        # are readable by any role, so introspection goes there directly.
+        # This was never caught locally because the dev/test Postgres
+        # estate connects as the `postgres` superuser, which trivially
+        # passes the information_schema role check regardless.
         cursor.execute(
             """
-            SELECT kcu.column_name
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-              ON tc.constraint_name = kcu.constraint_name
-             AND tc.table_schema = kcu.table_schema
-            WHERE tc.constraint_type = 'PRIMARY KEY'
-              AND tc.table_schema = %s AND tc.table_name = %s
-            ORDER BY kcu.ordinal_position
+            SELECT a.attname
+            FROM pg_constraint con
+            JOIN pg_class c ON c.oid = con.conrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
+            WHERE con.contype = 'p' AND n.nspname = %s AND c.relname = %s
+            ORDER BY k.ord
             """,
             (schema_name, table_name),
         )

@@ -29,6 +29,7 @@ load_dotenv(REPO_ROOT / ".env")
 from tools.source_catalog import (  # noqa: E402
     catalog_dag_artifacts,
     catalog_oracle_corpus,
+    catalog_postgres_tables,
     catalog_sql_server_tables,
 )
 from tools.sqlserver_client import get_connection  # noqa: E402
@@ -145,3 +146,96 @@ def test_estate_meets_day2_exit_condition_table_count():
 
     total = len(sql_server_records) + len(oracle_records)
     assert total >= 12, f"expected >= 12 tables for the Day 2 exit condition, got {total}"
+
+
+# --------------------------------------------------------------------------
+# Postgres (fake cursor — no live DB required)
+#
+# Regression coverage for a real bug found against a live Cloud SQL
+# instance (Deploy & Harden, 2026-08-22): the original primary-key query
+# read information_schema.table_constraints / key_column_usage, both of
+# which the SQL standard gates on has_table_privilege(oid, 'INSERT,
+# UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER') — SELECT is deliberately
+# not in that list, so a genuinely least-privilege read-only role (exactly
+# what migration_readonly is) saw zero primary-key columns on every table
+# it could otherwise query fine. Every local/manual run before this had
+# connected as the `postgres` superuser, which trivially passes that
+# check, so the bug was never observable until a real least-privilege
+# role hit it live. The fix reads pg_constraint/pg_class/pg_attribute
+# directly, which carry no such privilege gate.
+# --------------------------------------------------------------------------
+
+
+class _FakeCursor:
+    """Replays canned rows keyed by a substring of the executed SQL, so a
+    test can drive catalog_postgres_tables() without a real connection."""
+
+    def __init__(self, responses: dict[str, list[tuple]]):
+        self._responses = responses
+        self._last_key: str | None = None
+        self.executed_sql: list[str] = []
+
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        self.executed_sql.append(sql)
+        for key in self._responses:
+            if key in sql:
+                self._last_key = key
+                return
+        raise AssertionError(f"no fake response registered for SQL: {sql!r}")
+
+    def fetchall(self) -> list[tuple]:
+        return self._responses[self._last_key]
+
+    def fetchone(self) -> tuple | None:
+        rows = self._responses[self._last_key]
+        return rows[0] if rows else None
+
+
+class _FakeConn:
+    def __init__(self, cursor: _FakeCursor):
+        self._cursor = cursor
+
+    def cursor(self):
+        return self._cursor
+
+
+def _make_fake_postgres_conn(*, primary_key_rows: list[tuple]) -> tuple[_FakeConn, _FakeCursor]:
+    cursor = _FakeCursor({
+        "FROM information_schema.tables": [("retail", "orders")],
+        "FROM information_schema.columns": [
+            ("order_id", "integer", "NO"),
+            ("line_no", "integer", "NO"),
+        ],
+        "FROM pg_constraint": primary_key_rows,
+        "reltuples": [(100,)],
+        "pg_total_relation_size": [(4096,)],
+    })
+    return _FakeConn(cursor), cursor
+
+
+def test_postgres_primary_key_query_reads_pg_catalog_not_information_schema():
+    """The fix: no query anywhere in catalog_postgres_tables() should touch
+    information_schema.table_constraints or key_column_usage — those are
+    exactly the views a least-privilege SELECT-only role can't see rows in."""
+    conn, cursor = _make_fake_postgres_conn(primary_key_rows=[("order_id",)])
+    catalog_postgres_tables(conn, database="retail")
+    for sql in cursor.executed_sql:
+        assert "information_schema.table_constraints" not in sql
+        assert "information_schema.key_column_usage" not in sql
+
+
+def test_postgres_composite_primary_key_preserves_declared_column_order():
+    """order_items-style composite key: (order_id, line_no) must come back
+    in that order, not alphabetical or arbitrary — the Planner blocks
+    composite keys, but only after seeing the real column list."""
+    conn, _ = _make_fake_postgres_conn(
+        primary_key_rows=[("order_id",), ("line_no",)]
+    )
+    records = catalog_postgres_tables(conn, database="retail")
+    assert records[0]["primary_key"] == ["order_id", "line_no"]
+
+
+def test_postgres_table_with_no_primary_key_reports_empty_list():
+    conn, _ = _make_fake_postgres_conn(primary_key_rows=[])
+    records = catalog_postgres_tables(conn, database="retail")
+    assert records[0]["primary_key"] == []
