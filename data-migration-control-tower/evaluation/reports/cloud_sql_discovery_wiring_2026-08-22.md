@@ -109,22 +109,31 @@ regression test:
 ## Live result
 
 A real `migration.requested` publish against the live 9-service fleet, targeting the real Cloud SQL
-estate, genuinely advanced:
+estate, with all three bug fixes above deployed, genuinely advanced:
 
 ```
-REQUESTED -> DISCOVERED -> ANALYZED -> RISK_ASSESSED
-pinned_agents: {'discovery-agent': '2.0.0', 'lineage-agent': '2.0.0', 'risk-agent': '1.1.0'}
+REQUESTED -> DISCOVERED -> ANALYZED -> RISK_ASSESSED -> PLANNED
+pinned_agents: {
+  'discovery-agent': '2.0.0',
+  'lineage-agent': '2.0.0',
+  'risk-agent': '1.1.0',
+  'finance-impact-agent': '1.0.0',
+  'planner-agent': '2.0.0',
+}
 ```
 
-Three real agents, resolved by capability, invoked for real, against real data read from a real
-Cloud SQL Postgres instance over a real private network path — the deepest a live run driven purely
-through the deployed Pub/Sub/Cloud-Run topology has ever gotten in this project.
+**Five real agents**, resolved by capability, invoked for real, against real data read from a real
+Cloud SQL Postgres instance over a real private network path — including the Finance-impact
+cross-department check (§20.3) actually *succeeding*, not just degrading gracefully, confirming
+bug #5's fix resolved the policy mismatch rather than merely papering over its symptom. The deepest
+a live run driven purely through the deployed Pub/Sub/Cloud-Run topology has ever gotten in this
+project.
 
 ## What's still open
 
-- `RISK_ASSESSED -> PLANNED` (the Planner stage) had not yet been re-verified live as of this
-  report — bugs 4-6 above were found and fixed in the same investigation that reached
-  `RISK_ASSESSED`; a fresh run with all three fixes deployed is the next thing to confirm.
+- `PLANNED -> VALIDATING` (the async data-plane job path, `enable_data_plane_job=true`) was not
+  exercised in this pass — the run was left at `PLANNED` as the evidence checkpoint for this
+  session's scope ("wire up the Cloud SQL discovery path"), not driven further.
 - Same architectural note as before: every stage so far ran in-process inside the orchestrator
   (`runtime.type=local`), not over the typed HTTP dispatch path to each agent's own deployed
   service. That's a real, separate, larger piece of follow-up work — this session deliberately
