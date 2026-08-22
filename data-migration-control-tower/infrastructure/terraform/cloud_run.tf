@@ -109,6 +109,29 @@ resource "google_cloud_run_v2_service" "service" {
           value = env.value
         }
       }
+
+      # Role bootstrap allowlists (frontend/security.py) — control-tower-ui
+      # only, empty by default. Deliberately small/global per that
+      # module's own docstring; real per-estate access should move to
+      # Firebase custom claims instead of growing this list indefinitely.
+      dynamic "env" {
+        for_each = each.key == "control-tower-ui" && length(var.operator_allowlist) > 0 ? {
+          OPERATOR_ALLOWLIST = join(",", var.operator_allowlist)
+        } : {}
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+      dynamic "env" {
+        for_each = each.key == "control-tower-ui" && length(var.approver_allowlist) > 0 ? {
+          APPROVER_ALLOWLIST = join(",", var.approver_allowlist)
+        } : {}
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
       # SERVICE_AUDIENCE intentionally NOT set here — it would need this
       # service's own URL, which Terraform cannot reference from within
       # the same resource's own config. Set it in a follow-up

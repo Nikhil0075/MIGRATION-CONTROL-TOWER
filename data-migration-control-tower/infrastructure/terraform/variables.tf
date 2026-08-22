@@ -99,6 +99,18 @@ variable "cloud_run_max_instances" {
   default = 5
 }
 
+variable "operator_allowlist" {
+  type        = list(string)
+  default     = []
+  description = "Emails granted the operator role (frontend/security.py's OPERATOR_ALLOWLIST bootstrap — global, unscoped, meant for local dev and first-run only; real deployments should populate per-estate estate_roles custom claims instead and empty this)."
+}
+
+variable "approver_allowlist" {
+  type        = list(string)
+  default     = []
+  description = "Emails granted the approver role (frontend/security.py's APPROVER_ALLOWLIST bootstrap — same caveats as operator_allowlist)."
+}
+
 variable "firebase_web_config" {
   type = object({
     api_key             = string
