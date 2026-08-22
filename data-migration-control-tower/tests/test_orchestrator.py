@@ -702,3 +702,29 @@ def test_dedup_claim_without_a_message_id_always_proceeds():
     status, cached = orchestrator._dedup_claim({}, "test_handler")
     assert status == "claimed"
     assert cached is None
+
+
+def test_trigger_finance_impact_check_degrades_gracefully_on_policy_denial(monkeypatch):
+    """Regression test for a real bug found live (Deploy & Harden Phase 5
+    close-out): trigger_finance_impact_check() only caught
+    registry.NoApprovedProvider, not registry.CapabilityDenied — so a real
+    policy/registry mismatch (fixed separately in
+    tools/registry.py::invoke_capability()'s wildcard-vs-concrete-capability
+    check) crashed handle_discovery_completed entirely, taking the whole
+    run's ANALYZED->RISK_ASSESSED progression down with it, rather than
+    just skipping this one optional cross-department check the way the
+    function's own docstring already promised for the "no provider"
+    case. A policy DENY is exactly as "finance isn't available to help
+    with this" as no provider being found at all — both must degrade the
+    same way."""
+    from tools import registry as registry_module
+
+    def deny(capability, run_id):
+        raise registry_module.CapabilityDenied(
+            {"decision": "DENY", "agent_id": "finance", "action": capability, "reason": "test denial"}
+        )
+
+    monkeypatch.setattr(orchestrator.registry, "invoke_capability", deny)
+
+    result = orchestrator.trigger_finance_impact_check("run-does-not-need-to-exist")
+    assert result is None

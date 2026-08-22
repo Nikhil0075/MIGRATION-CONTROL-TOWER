@@ -132,6 +132,53 @@ def test_discover_wildcard_matches_prefix(registered):
 
 
 @skip_if_no_firestore
+def test_invoke_capability_with_a_wildcard_query_checks_policy_against_the_resolved_concrete_capability(
+    registered, monkeypatch
+):
+    """Regression test for a real bug found live (Deploy & Harden Phase 5
+    close-out): a wildcard capability request (e.g. §20.3's cross-department
+    'impact.assessment.*' finance-impact lookup) resolves to a card via a
+    prefix match, but invoke_capability()'s policy check used to check the
+    raw wildcard STRING against allowed_tools, not the card's actual
+    matched concrete capability. Since a policy entry is always written as
+    a concrete capability (e.g. 'capability:impact.assessment.finance_reporting'),
+    never a wildcard pattern, this denied EVERY wildcard-resolved capability
+    call regardless of what the target agent is actually permitted to do —
+    confirmed live: the real Finance agent dispatch failed this way the
+    first time it was ever exercised end-to-end.
+
+    Uses a monkeypatched permissions file (tools.policy_engine._load_permissions
+    is @lru_cache'd but a plain monkeypatch replaces the function object
+    entirely, bypassing the cache) rather than editing the real
+    policies/agent_permissions.yaml, so this test can allow a concrete
+    capability without touching production policy config.
+    """
+    agent_id = f"test-agent-{uuid.uuid4().hex[:8]}"
+    prefix = f"test.wildcardpolicy.{uuid.uuid4().hex[:8]}"
+    concrete_capability = f"{prefix}.concrete"
+    permissions_key = f"test-wildcard-policy-{uuid.uuid4().hex[:8]}"
+
+    monkeypatch.setattr(
+        policy_engine,
+        "_load_permissions",
+        lambda: {permissions_key: {"allowed_tools": [f"capability:{concrete_capability}"]}},
+    )
+
+    registered(
+        _make_card(agent_id, concrete_capability, permissions_key=permissions_key),
+        published_by="pub@example.internal",
+    )
+    registry.approve(agent_id, "1.0.0", approved_by="governance@example.internal")
+
+    # The wildcard query itself is never in allowed_tools — only the
+    # concrete resolved capability is. This must succeed, not raise
+    # CapabilityDenied, proving the check uses the resolved name.
+    result, resolved_agent_id, resolved_version = registry.invoke_capability(f"{prefix}.*")
+    assert resolved_agent_id == agent_id
+    assert resolved_version == "1.0.0"
+
+
+@skip_if_no_firestore
 def test_deprecate_removes_from_discovery(registered):
     agent_id = f"test-agent-{uuid.uuid4().hex[:8]}"
     capability = f"test.deprecate.{uuid.uuid4().hex[:8]}"

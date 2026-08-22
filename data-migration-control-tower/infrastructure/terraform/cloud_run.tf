@@ -143,6 +143,30 @@ resource "google_cloud_run_v2_service" "service" {
       # tools/capability_http_server.py's own docstring already flags as
       # a real gap, not a hidden one.
     }
+
+    # Direct VPC egress, orchestrator only (Deploy & Harden Phase 5
+    # close-out — "wire up the Cloud SQL discovery path"). Discovery's
+    # AgentCard is still runtime.type=local (docs/compliance_matrix.md's
+    # own honest note), so tools/registry.py::invoke_capability() runs
+    # Discovery's code IN-PROCESS inside the orchestrator, under
+    # sa-orchestrator's identity — meaning the orchestrator's own network
+    # path is what needs to reach Cloud SQL's private IP, not
+    # discovery-agent's separately-deployed (but not yet actually
+    # dispatched-to) service. Confirmed live during the earlier
+    # investigation into why Discovery's SQL Server calls run under
+    # sa-orchestrator at all. PRIVATE_RANGES_ONLY keeps every other
+    # outbound call (Firestore, Pub/Sub, BigQuery, every agent-to-agent
+    # HTTP capability call) on the normal public-internet path.
+    dynamic "vpc_access" {
+      for_each = each.key == "orchestrator" && var.enable_cloud_sql ? [1] : []
+      content {
+        network_interfaces {
+          network    = data.google_compute_network.default[0].id
+          subnetwork = data.google_compute_subnetwork.default[0].id
+        }
+        egress = "PRIVATE_RANGES_ONLY"
+      }
+    }
   }
 
   # Ingress: public for the console, internal-plus-load-balancer for
@@ -191,3 +215,14 @@ resource "google_cloud_run_v2_service_iam_member" "allowed_callers" {
   role     = "roles/run.invoker"
   member   = "serviceAccount:${local.service_account_email_by_key[each.value.caller]}"
 }
+
+# Same GOTCHA as google_cloud_run_v2_service_iam_member.public_frontend's
+# comment above, confirmed a second time live (Deploy & Harden Phase 5
+# close-out, orchestrator specifically): `-replace`-ing a service wipes
+# its whole IAM policy, and these caller bindings won't be reapplied
+# automatically since their own attributes don't change. This bit
+# orchestrator concretely: after a `-replace` to pick up a code fix,
+# sa-pubsub-invoker could no longer call any of orchestrator's 8 push
+# routes until this binding was reapplied by hand. If you `-replace` any
+# service, `-replace` (or otherwise reapply) its allowed_callers entries
+# in the SAME apply.

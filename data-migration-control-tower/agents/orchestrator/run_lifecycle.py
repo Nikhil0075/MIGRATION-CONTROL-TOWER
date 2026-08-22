@@ -24,6 +24,7 @@ import re
 import uuid
 
 from google.cloud import firestore
+from google.cloud.firestore_v1.field_path import FieldPath
 
 from tools.connection_context import DEFAULT_ESTATE_ID
 from tools.firestore_client import get_client
@@ -194,11 +195,32 @@ def pin_agent_version(run_id: str, agent_key: str, version: str) -> None:
     Written before dispatching, per §20.4: "The orchestrator resolves the
     next actor by capability at every state transition and writes the
     resolved agent_id and version into the run record before dispatching."
+
+    Found live (Deploy & Harden Phase 5 close-out — the first time
+    Discovery ever actually succeeded against a real reachable source
+    and this function got called with a real agent_id for real):
+    `{f"pinned_agents.{agent_key}": version}` is a DOTTED-STRING update
+    key, and Firestore's Python SDK parses those with
+    FieldPath.from_string(), which rejects any segment containing a
+    character outside [a-zA-Z0-9_] — every agent_id in this whole system
+    is hyphenated ("lineage-agent", "discovery-agent", ...), so this
+    call has never once succeeded with a real agent_id against real
+    Firestore. No test caught it because nothing exercised this against
+    a live backend with a real hyphenated key before now.
+
+    Fixed by building the key via FieldPath(...).to_api_repr() — the
+    backtick-escaped dotted string ("pinned_agents.`lineage-agent`"),
+    not a bare FieldPath object: this installed SDK version's own
+    .update() re-parses whatever key it's given through
+    FieldPath.from_api_repr(), which requires a string and raises
+    AttributeError on an actual FieldPath instance (confirmed directly —
+    passing the FieldPath object itself fails differently, not more
+    correctly). The escaped string is what from_string()'s own
+    backtick-aware parser is designed to round-trip.
     """
     client = get_client()
-    client.collection(RUN_COLLECTION).document(run_id).update(
-        {f"pinned_agents.{agent_key}": version}
-    )
+    key = FieldPath("pinned_agents", agent_key).to_api_repr()
+    client.collection(RUN_COLLECTION).document(run_id).update({key: version})
 
 
 def delete_run(run_id: str) -> None:

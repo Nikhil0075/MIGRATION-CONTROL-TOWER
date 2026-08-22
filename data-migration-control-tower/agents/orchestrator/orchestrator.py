@@ -524,11 +524,26 @@ def trigger_finance_impact_check(run_id: str, capability: str = "impact.assessme
     is APPROVED, it gets invoked here with zero orchestrator changes. If
     it's ever deprecated, this logs and returns None rather than
     crashing — the negative proof from §20.3.
+
+    Also degrades gracefully on a policy DENY (registry.CapabilityDenied),
+    not just "no provider found" — found live (Deploy & Harden Phase 5
+    close-out): a real policy/registry mismatch (fixed separately in
+    tools/registry.py::invoke_capability()) denied this exact call and,
+    because only NoApprovedProvider was caught here, crashed the whole
+    handle_discovery_completed handler — meaning a finance-impact policy
+    misconfiguration could take down every run's ANALYZED->RISK_ASSESSED
+    progression, not just skip the one optional cross-department check
+    this function exists to make optional in the first place. A denial
+    is exactly as "finance isn't available to help with this" as no
+    provider being found at all.
     """
     try:
         result, agent_id, version = registry.invoke_capability(capability, run_id)
     except registry.NoApprovedProvider as exc:
         logger.warning("finance impact check skipped: %s", exc)
+        return None
+    except registry.CapabilityDenied as exc:
+        logger.warning("finance impact check skipped (policy denied): %s", exc)
         return None
 
     pin_agent_version(run_id, agent_id, version)

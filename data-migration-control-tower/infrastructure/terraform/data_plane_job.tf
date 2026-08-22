@@ -101,3 +101,92 @@ resource "google_cloud_run_v2_job" "data_plane" {
     }
   }
 }
+
+# One-off schema/data/grants bootstrap (Deploy & Harden Phase 5 close-out
+# — "wire up the Cloud SQL discovery path"). Its own dedicated SA, never
+# shared with the data-plane job's own SA above: this is the only thing
+# in the whole deployment that ever reads the postgres superuser
+# password, and least-privilege means that access stays scoped to
+# exactly this one job. See tools/data_plane_job/bootstrap_retail_db.py
+# for what it actually does — idempotent, safe to re-run.
+resource "google_service_account" "db_bootstrap" {
+  count = var.enable_cloud_sql ? 1 : 0
+
+  project      = var.project_id
+  account_id   = "sa-db-bootstrap"
+  display_name = "One-off Cloud SQL schema/grants bootstrap (Deploy & Harden Phase 5)"
+}
+
+resource "google_project_iam_member" "db_bootstrap_cloudsql_client" {
+  count = var.enable_cloud_sql ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.db_bootstrap[0].email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "db_bootstrap_reads_superuser_password" {
+  count = var.enable_cloud_sql ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.postgres_superuser_password[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.db_bootstrap[0].email}"
+}
+
+resource "google_cloud_run_v2_job" "db_bootstrap" {
+  count = var.enable_cloud_sql ? 1 : 0
+
+  project  = var.project_id
+  name     = "postgres-retail-db-bootstrap"
+  location = var.region
+
+  template {
+    template {
+      service_account = google_service_account.db_bootstrap[0].email
+      max_retries      = 0
+      # Reuses the data-plane job's own image (same Dockerfile, same
+      # psycopg dependency) — only the command/args differ, so no
+      # separate image build is needed for this one-off job.
+      containers {
+        image   = var.data_plane_job_image_tag
+        command = ["python"]
+        args    = ["-m", "tools.data_plane_job.bootstrap_retail_db"]
+
+        env {
+          name  = "POSTGRES_HOST"
+          value = google_sql_database_instance.postgres_retail_exec[0].private_ip_address
+        }
+        env {
+          name  = "POSTGRES_PORT"
+          value = "5432"
+        }
+        env {
+          name  = "POSTGRES_DATABASE"
+          value = google_sql_database.retail[0].name
+        }
+        # Cloud Run's native Secret Manager env-var binding — the value
+        # never appears in this job's own config (`gcloud run jobs
+        # describe` shows only the secret reference, not the secret
+        # itself), unlike a plain `env { value = ... }` would.
+        env {
+          name = "POSTGRES_SUPERUSER_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.postgres_superuser_password[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      vpc_access {
+        network_interfaces {
+          network    = data.google_compute_network.default[0].id
+          subnetwork = data.google_compute_subnetwork.default[0].id
+        }
+        egress = "PRIVATE_RANGES_ONLY"
+      }
+    }
+  }
+}

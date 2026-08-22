@@ -247,6 +247,20 @@ def invoke_capability(capability: str, *args, **kwargs):
     decision gets recorded against the wrong run_id, not a wrong
     authorization outcome — the ALLOW/DENY decision itself never depends
     on run_id.
+
+    Wildcard requests (e.g. "impact.assessment.*" — trigger_finance_impact_check's
+    cross-department capability search, §20.3) resolve to a card via
+    _capability_matches()'s prefix match, but the POLICY check below
+    must be made against the card's own CONCRETE matched capability
+    (e.g. "impact.assessment.finance_reporting"), never the raw wildcard
+    string — found live (Deploy & Harden Phase 5 close-out, discovered
+    the first time a real end-to-end run actually reached this code
+    path): checking `capability:impact.assessment.*` against
+    `policies/agent_permissions.yaml`'s `capability:impact.assessment.finance_reporting`
+    entry is a literal string mismatch, so this denied every wildcard
+    capability call regardless of what the target agent is actually
+    permitted to do — silently defeating the whole point of Phase 1a's
+    policy gate for any wildcard-resolved capability, not just this one.
     """
     from tools import policy_engine
 
@@ -255,12 +269,20 @@ def invoke_capability(capability: str, *args, **kwargs):
     if run_id is None and args and isinstance(args[0], str):
         run_id = args[0]
 
+    resolved_capability = capability
+    if capability.endswith(".*"):
+        prefix = capability[:-1]
+        resolved_capability = next(
+            (cap for cap in card.get("capabilities", []) if cap.startswith(prefix)),
+            capability,  # defensive fallback; resolve_capability_handler already guarantees a match exists
+        )
+
     decision = policy_engine.evaluate(
         card.get("permissions_key"),
-        f"capability:{capability}",
+        f"capability:{resolved_capability}",
         "METADATA",
         run_id,
-        tool_name=capability,
+        tool_name=resolved_capability,
     )
     if decision["decision"] != policy_engine.DECISION_ALLOW:
         raise CapabilityDenied(decision)

@@ -87,3 +87,57 @@ resource "google_secret_manager_secret_version" "postgres_readonly_password" {
   secret      = google_secret_manager_secret.postgres_readonly_password[0].id
   secret_data = random_password.postgres_readonly[0].result
 }
+
+# sa-orchestrator reads this — not sa-discovery — because Discovery's
+# AgentCard is still runtime.type=local, so its code runs in-process
+# inside the orchestrator (see cloud_run.tf's vpc_access comment on the
+# same point). Re-scope this to sa-discovery instead once that AgentCard
+# is flipped to runtime.type=cloud_run and dispatch genuinely moves to
+# discovery-agent's own deployed service.
+resource "google_secret_manager_secret_iam_member" "orchestrator_reads_postgres_readonly_password" {
+  count = var.enable_cloud_sql ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.postgres_readonly_password[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.agent["sa-orchestrator"].email}"
+}
+
+# Bootstrap superuser credential (Deploy & Harden Phase 5 close-out) —
+# used exactly once, by tools/data_plane_job/bootstrap_retail_db.py via
+# the db_bootstrap job below, to create the retail schema/sample data
+# and apply the actual REVOKE/GRANT this file's own header comment says
+# "is applied post-create via a SQL migration script." Never handed to
+# any agent SA — only the bootstrap job's own SA reads it.
+resource "random_password" "postgres_superuser" {
+  count   = var.enable_cloud_sql ? 1 : 0
+  length  = 32
+  special = true
+}
+
+resource "google_sql_user" "postgres_superuser" {
+  count = var.enable_cloud_sql ? 1 : 0
+
+  project  = var.project_id
+  instance = google_sql_database_instance.postgres_retail_exec[0].name
+  name     = "postgres"
+  password = random_password.postgres_superuser[0].result
+}
+
+resource "google_secret_manager_secret" "postgres_superuser_password" {
+  count = var.enable_cloud_sql ? 1 : 0
+
+  project   = var.project_id
+  secret_id = "postgres-retail-exec-superuser-password"
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "postgres_superuser_password" {
+  count = var.enable_cloud_sql ? 1 : 0
+
+  secret      = google_secret_manager_secret.postgres_superuser_password[0].id
+  secret_data = random_password.postgres_superuser[0].result
+}

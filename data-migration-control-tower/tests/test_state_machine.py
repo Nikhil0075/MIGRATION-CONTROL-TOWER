@@ -21,6 +21,7 @@ from agents.orchestrator.run_lifecycle import (  # noqa: E402
     _allowed_next_states,
     create_run,
     delete_run,
+    pin_agent_version,
     transition_state,
 )
 
@@ -107,3 +108,24 @@ def test_legal_transition_succeeds(temp_run):
 @pytest.mark.skipif(not _firestore_reachable(), reason="Firestore not reachable")
 def test_force_bypasses_legality_check(temp_run):
     transition_state(temp_run, "COMPLETE", force=True)  # would be illegal without force
+
+
+@pytest.mark.skipif(not _firestore_reachable(), reason="Firestore not reachable")
+def test_pin_agent_version_accepts_a_real_hyphenated_agent_id(temp_run):
+    """Regression test for a real bug found live (Deploy & Harden Phase 5
+    close-out): pin_agent_version() used to build its Firestore update key
+    as a dotted string (f"pinned_agents.{agent_key}"), which
+    FieldPath.from_string() rejects for any agent_key containing a
+    character outside [a-zA-Z0-9_] — and every agent_id in this system is
+    hyphenated ("lineage-agent", "discovery-agent", ...), so this call had
+    never once succeeded with a real agent_id against real Firestore
+    before it was actually exercised live. No prior test caught it
+    because nothing called this against a live backend with a real
+    hyphenated key. Asserts both that the write doesn't raise and that
+    the value round-trips correctly."""
+    from tools.firestore_client import get_client
+
+    pin_agent_version(temp_run, "lineage-agent", "3")
+
+    doc = get_client().collection("migration_runs").document(temp_run).get().to_dict()
+    assert doc["pinned_agents"]["lineage-agent"] == "3"
