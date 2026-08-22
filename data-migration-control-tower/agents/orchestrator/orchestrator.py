@@ -718,7 +718,60 @@ def handle_planned(payload: dict) -> dict:
     # as explicit follow-up, not silently shipped as if solved.
     try:
         with tracing.span("handle_planned", run_id=run_id, drop_fraction=drop_fraction):
-            transition_state(run_id, "MIGRATING")
+            # Real defect found live (Deploy & Harden, 2026-08-22): a slow
+            # handler here (Wave Manager's bounded-retry admission, then a
+            # real Cloud Run Jobs API call per target) can outlast the
+            # Pub/Sub push subscription's ack deadline. Pub/Sub then
+            # redelivers the SAME message while the original call is
+            # still in flight or has since crashed after the transition
+            # but before _dedup_complete(). Every redelivery re-enters
+            # this function fresh (get_run() above is re-read per call),
+            # so the naive `transition_state(run_id, "MIGRATING")` below
+            # raised on MIGRATING -> MIGRATING for every single retry —
+            # and since a raised exception is never acked, Pub/Sub kept
+            # redelivering it forever rather than backing off. Skipping
+            # an already-applied transition breaks that livelock; the
+            # sync path's redo-in-full is already documented safe below
+            # (truncate-and-reload), so only the async path needs to also
+            # confirm nothing was already submitted before proceeding.
+            already_migrating = run.get("state") == "MIGRATING"
+            if already_migrating and is_async:
+                # pending_remote_executions alone is NOT evidence a job was
+                # actually submitted -- _set_pending_executions() below
+                # writes it BEFORE the submission loop even starts, so a
+                # crash inside the loop's first _submit_job() call (a real
+                # instance of this: DATA_PLANE_JOB_NAME configured with a
+                # bare job name instead of the fully-qualified resource
+                # path Cloud Run Jobs' RunJobRequest requires) leaves the
+                # counter set with nothing genuinely running. Checking
+                # migration_executions for a real data_plane_job_id is the
+                # only way to tell "submitted, don't duplicate" apart from
+                # "counted but never actually submitted, safe to redo".
+                already_submitted = any(
+                    (doc.to_dict() or {}).get("data_plane_job_id")
+                    for doc in get_client()
+                    .collection("migration_runs")
+                    .document(run_id)
+                    .collection("migration_executions")
+                    .stream()
+                )
+                if already_submitted:
+                    raise RuntimeError(
+                        f"Run {run_id!r} is already MIGRATING with at least one remote "
+                        "execution genuinely submitted to the async data plane -- "
+                        "refusing to resubmit on redelivery, which would double-submit "
+                        "real Cloud Run Job executions against the same targets. "
+                        "Investigate migration_executions for this run and advance "
+                        "manually if the prior submission genuinely failed."
+                    )
+            if already_migrating:
+                logger.warning(
+                    "handle_planned: run %s is already MIGRATING (stale-claim redo "
+                    "after a redelivered plan.created) -- resuming without "
+                    "re-applying the PLANNED -> MIGRATING transition", run_id,
+                )
+            else:
+                transition_state(run_id, "MIGRATING")
 
             if is_async:
                 _set_pending_executions(run_id, len(targets))

@@ -518,6 +518,159 @@ def test_handle_planned_async_branch_submits_and_stays_in_migrating(monkeypatch)
 
 
 @skip_if_no_firestore
+def test_handle_planned_resumes_after_a_redelivery_that_arrives_post_transition(monkeypatch):
+    """Reproduces a real defect found live (Deploy & Harden, 2026-08-22):
+    a slow handler here (Wave Manager's bounded-retry admission, then a
+    real Cloud Run Jobs API call per target) can outlast the push
+    subscription's ack deadline. Pub/Sub then redelivers plan.created
+    while the original call is still in flight or has since crashed
+    after transitioning to MIGRATING but before _dedup_complete() ran.
+    The naive `transition_state(run_id, "MIGRATING")` used to raise on
+    every single redelivery (MIGRATING -> MIGRATING is an illegal
+    transition) — and since a raised exception is never acked, Pub/Sub
+    redelivered it forever. Live acceptance testing hit exactly this: a
+    run stuck at MIGRATING with zero submitted executions, retried every
+    few seconds without ever making progress."""
+    from agents.orchestrator.run_lifecycle import create_run, delete_run, get_run, transition_state
+
+    run_id = create_run("test.orchestrator.resume_after_redelivery", drop_fraction=0.0)
+    targets = [{
+        "target_id": "t1", "source_schema": "public", "source_table": "orders",
+        "target_table": "orders_dim", "key_column": "id", "order_by": "id",
+        "scheduled": True, "blocked": False,
+    }]
+    execute_calls = []
+    try:
+        for state in ("DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED", "MIGRATING"):
+            transition_state(run_id, state)
+        seed_migration_plan(run_id, targets=targets)
+        # Matches the live symptom exactly: already MIGRATING, but nothing
+        # was ever actually submitted (the crash/redelivery happened
+        # before _set_pending_executions ever ran).
+        assert get_run(run_id).get("pending_remote_executions") is None
+
+        monkeypatch.setattr(orchestrator, "_select_data_plane_executor", lambda: object())
+
+        def fake_execute_migration(*, run_id, target, binding, drop_fraction, data_plane=None):
+            execute_calls.append(target["target_id"])
+            return {"execution_id": f"exec-{target['target_id']}", "status": "PENDING", "run_id": run_id}
+
+        monkeypatch.setattr(orchestrator, "execute_migration", fake_execute_migration)
+        monkeypatch.setattr(orchestrator, "publish", lambda topic, payload: None)
+
+        # A genuinely fresh delivery (its own message_id, exactly like a
+        # real Pub/Sub redelivery of the same underlying message) for a
+        # run that is already MIGRATING must not crash.
+        result = orchestrator.handle_planned(
+            {"run_id": run_id, "_pubsub_message_id": f"test-{uuid.uuid4().hex}"}
+        )
+
+        assert result["async"] is True
+        assert len(execute_calls) == 1, "the stalled submission must actually happen, not be skipped entirely"
+        assert get_run(run_id)["state"] == "MIGRATING"
+    finally:
+        delete_run(run_id)
+
+
+@skip_if_no_firestore
+def test_handle_planned_refuses_to_resubmit_when_executions_were_already_submitted(monkeypatch):
+    """The other half of the same fix: if a prior attempt DID already
+    submit real Cloud Run Job executions before crashing, a redelivery
+    must not silently resubmit them (double-billed, duplicate writes
+    against the same targets) — it should fail loudly and distinctly
+    instead of either crashing on the illegal transition or quietly
+    re-running execute_migration.
+
+    pending_remote_executions alone is deliberately NOT what triggers
+    this guard (see test_handle_planned_resumes_after_a_redelivery_that_
+    arrives_post_transition — that field is set before submission even
+    starts, so a crash inside the first target's own submission would
+    otherwise wrongly look identical to "already submitted, once real
+    proof of submission is required"). Only a migration_executions doc
+    that actually carries a data_plane_job_id counts as proof."""
+    from agents.orchestrator.run_lifecycle import create_run, delete_run, transition_state
+
+    run_id = create_run("test.orchestrator.refuse_resubmit", drop_fraction=0.0)
+    targets = [{
+        "target_id": "t1", "source_schema": "public", "source_table": "orders",
+        "target_table": "orders_dim", "key_column": "id", "order_by": "id",
+        "scheduled": True, "blocked": False,
+    }]
+    try:
+        for state in ("DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED", "MIGRATING"):
+            transition_state(run_id, state)
+        seed_migration_plan(run_id, targets=targets)
+        orchestrator._set_pending_executions(run_id, 1)
+        get_client_for_test().collection("migration_runs").document(run_id).collection(
+            "migration_executions"
+        ).document("exec-t1").set({"data_plane_job_id": "projects/p/locations/r/jobs/j/executions/e1"})
+
+        monkeypatch.setattr(orchestrator, "_select_data_plane_executor", lambda: object())
+        monkeypatch.setattr(
+            orchestrator, "execute_migration",
+            lambda **kwargs: pytest.fail("must not resubmit an already-submitted execution"),
+        )
+
+        with pytest.raises(RuntimeError, match="refusing to resubmit"):
+            orchestrator.handle_planned(
+                {"run_id": run_id, "_pubsub_message_id": f"test-{uuid.uuid4().hex}"}
+            )
+    finally:
+        delete_run(run_id)
+
+
+@skip_if_no_firestore
+def test_handle_planned_redoes_submission_when_pending_count_was_set_but_nothing_actually_submitted(
+    monkeypatch,
+):
+    """Reproduces the exact live sequel to the redelivery bug above
+    (Deploy & Harden, 2026-08-22): DATA_PLANE_JOB_NAME was deployed with
+    a bare job name instead of the fully-qualified projects/P/locations/
+    R/jobs/NAME path CloudRunJobExecutor._submit_job()'s RunJobRequest
+    requires, so the first target's real submission call raised inside
+    the loop -- AFTER _set_pending_executions() had already written
+    pending_remote_executions, but before any migration_executions doc
+    got a real data_plane_job_id. A guard keyed on pending_remote_
+    executions alone (an earlier, too-blunt version of this fix) then
+    refused every redelivery forever, mistaking "counted" for
+    "genuinely submitted". The fix checks for a real data_plane_job_id
+    instead, so this exact state must be treated as safe to redo."""
+    from agents.orchestrator.run_lifecycle import create_run, delete_run, get_run, transition_state
+
+    run_id = create_run("test.orchestrator.redo_after_uncounted_crash", drop_fraction=0.0)
+    targets = [{
+        "target_id": "t1", "source_schema": "public", "source_table": "orders",
+        "target_table": "orders_dim", "key_column": "id", "order_by": "id",
+        "scheduled": True, "blocked": False,
+    }]
+    execute_calls = []
+    try:
+        for state in ("DISCOVERED", "ANALYZED", "RISK_ASSESSED", "PLANNED", "MIGRATING"):
+            transition_state(run_id, state)
+        seed_migration_plan(run_id, targets=targets)
+        orchestrator._set_pending_executions(run_id, 1)  # the counter alone, exactly like the live crash
+
+        monkeypatch.setattr(orchestrator, "_select_data_plane_executor", lambda: object())
+
+        def fake_execute_migration(*, run_id, target, binding, drop_fraction, data_plane=None):
+            execute_calls.append(target["target_id"])
+            return {"execution_id": f"exec-{target['target_id']}", "status": "PENDING", "run_id": run_id}
+
+        monkeypatch.setattr(orchestrator, "execute_migration", fake_execute_migration)
+        monkeypatch.setattr(orchestrator, "publish", lambda topic, payload: None)
+
+        result = orchestrator.handle_planned(
+            {"run_id": run_id, "_pubsub_message_id": f"test-{uuid.uuid4().hex}"}
+        )
+
+        assert result["async"] is True
+        assert len(execute_calls) == 1
+        assert get_run(run_id)["state"] == "MIGRATING"
+    finally:
+        delete_run(run_id)
+
+
+@skip_if_no_firestore
 def test_handle_migration_completed_waits_for_every_pending_execution(monkeypatch):
     """Two submitted executions -> the run must stay in MIGRATING after
     only the first migration.completed arrives, and only transition to

@@ -132,6 +132,37 @@ resource "google_cloud_run_v2_service" "service" {
           value = env.value
         }
       }
+      # Async data-plane executor selection (Deploy & Harden Phase 3,
+      # docs/adr/0003) — orchestrator only. Found missing live
+      # (2026-08-22): google_cloud_run_v2_job.data_plane existed and was
+      # reachable, but tools/orchestrator/orchestrator.py::
+      # _select_data_plane_executor() reads DATA_PLANE_EXECUTOR from the
+      # environment and had nothing to read — every run silently took
+      # the synchronous InMemoryExecutor path instead, never exercising
+      # the Cloud Run Job this variable exists to enable. Without this,
+      # enable_data_plane_job only creates the job resource; it never
+      # wires anything to actually invoke it.
+      dynamic "env" {
+        for_each = each.key == "orchestrator" && var.enable_data_plane_job ? {
+          DATA_PLANE_EXECUTOR = "cloud_run_job"
+          # .id, not .name: tools/data_plane_executors/cloud_run_job_
+          # executor.py's own JOB_NAME_ENV_VAR docstring requires the
+          # fully-qualified projects/P/locations/R/jobs/NAME form (the
+          # Cloud Run Jobs v2 API's RunJobRequest.name field rejects a
+          # bare job name) — .name on this resource is the bare id
+          # alone. Caught live: the bare form let execute_remote() write
+          # its PENDING migration_executions doc and then crash inside
+          # _submit_job(), which (before handle_planned's own
+          # already-migrating guard existed) fed straight back into the
+          # illegal-transition redelivery loop this same investigation
+          # found and fixed.
+          DATA_PLANE_JOB_NAME = google_cloud_run_v2_job.data_plane[0].id
+        } : {}
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
       # SERVICE_AUDIENCE intentionally NOT set here — it would need this
       # service's own URL, which Terraform cannot reference from within
       # the same resource's own config. Set it in a follow-up
@@ -142,6 +173,24 @@ resource "google_cloud_run_v2_service" "service" {
       # done, OIDC audience checking is permissive (any audience), which
       # tools/capability_http_server.py's own docstring already flags as
       # a real gap, not a hidden one.
+      #
+      # GOTCHA, caught in `terraform plan` review before it shipped
+      # (2026-08-22), same family as the IAM-wipe gotcha below: on an
+      # environment where SERVICE_AUDIENCE was already set out-of-band
+      # via `gcloud run services update`, running `terraform apply` after
+      # adding a NEW dynamic "env" block above (e.g. the async
+      # data-plane one) does not just add the new vars — the plan showed
+      # it renaming the out-of-band SERVICE_AUDIENCE entry itself, i.e.
+      # Terraform's env list is authoritative and would have deleted it,
+      # since apply time it isn't declared anywhere in this file. Once
+      # SERVICE_AUDIENCE has been set out-of-band for a service, any
+      # further env-var change to that service must also go through
+      # `gcloud run services update --update-env-vars` (which merges)
+      # rather than `terraform apply` (which replaces the whole list),
+      # until SERVICE_AUDIENCE is itself brought under Terraform
+      # management — not done here, since that needs a two-pass apply
+      # (create the service, then set audience from its own output) that
+      # this module doesn't yet support.
     }
 
     # Direct VPC egress, orchestrator only (Deploy & Harden Phase 5
