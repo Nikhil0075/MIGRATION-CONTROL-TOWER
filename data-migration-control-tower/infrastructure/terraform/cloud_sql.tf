@@ -20,12 +20,18 @@ resource "google_sql_database_instance" "postgres_retail_exec" {
 
   deletion_protection = true
 
+  # Private Services Access peering (network.tf) must exist before Cloud
+  # SQL can actually attach a private IP to it — without this explicit
+  # dependency Terraform could try to create the instance and the
+  # peering connection in either order.
+  depends_on = [google_service_networking_connection.private_services_access]
+
   settings {
     tier = var.cloud_sql_tier
 
     ip_configuration {
       ipv4_enabled    = false # no public IP
-      private_network = null  # set to a VPC self_link if using Direct VPC egress from Cloud Run — see README.md's networking note
+      private_network = data.google_compute_network.default[0].id # network.tf
     }
 
     backup_configuration {

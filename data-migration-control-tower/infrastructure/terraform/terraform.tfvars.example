@@ -20,12 +20,27 @@ service_image_tags = {
   "finance-impact-agent" = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/finance-impact-agent:v1"
 }
 
-# Uncomment once a Postgres pricing tier is confirmed (Phase 3b's checkpoint):
+# Uncomment once a Postgres pricing tier is confirmed (Phase 3b's checkpoint).
+# Also provisions network.tf's Private Services Access peering — the
+# first apply with this on takes a few minutes longer than usual.
 # enable_cloud_sql = true
 
 # Uncomment once the data-plane job image is built and pushed:
 # enable_data_plane_job    = true
 # data_plane_job_image_tag = "us-central1-docker.pkg.dev/PROJECT_ID/control-tower/data-plane-job:v1"
+
+# Firebase Web SDK config for control-tower-ui — see variables.tf's own
+# description for why these are safe to keep in a gitignored (not
+# secret-handling) file. Without this, the console shows "Firebase
+# authentication is not configured" and nobody can sign in.
+# firebase_web_config = {
+#   api_key             = "..."
+#   auth_domain         = "PROJECT_ID.firebaseapp.com"
+#   project_id          = "PROJECT_ID"
+#   storage_bucket      = "PROJECT_ID.firebasestorage.app"
+#   messaging_sender_id = "..."
+#   app_id              = "1:...:web:..."
+# }
 
 # At least one entry here before any monitoring alert fires anywhere:
 # alert_notification_channels = ["projects/PROJECT_ID/notificationChannels/CHANNEL_ID"]

@@ -99,6 +99,36 @@ variable "cloud_run_max_instances" {
   default = 5
 }
 
+variable "firebase_web_config" {
+  type = object({
+    api_key             = string
+    auth_domain         = string
+    project_id          = string
+    storage_bucket      = string
+    messaging_sender_id = string
+    app_id              = string
+  })
+  default     = null
+  description = <<-EOT
+    Firebase Web SDK config for control-tower-ui, matching what
+    frontend/api_v1.py::_firebase_web_config() reads
+    (FIREBASE_API_KEY/FIREBASE_AUTH_DOMAIN/FIREBASE_PROJECT_ID/
+    FIREBASE_STORAGE_BUCKET/FIREBASE_MESSAGING_SENDER_ID/FIREBASE_APP_ID).
+    These are NOT secrets — the Firebase client SDK config is safe to
+    expose (restricted by Firebase Security Rules and API key
+    restrictions, not by secrecy — see firestore.rules's own header
+    comment on this exact point) — but there is no sane cross-project
+    default, so this stays null (Firebase auth shows as "not
+    configured" in the UI, matching frontend/client's own honest
+    warning state) until a real project's values are supplied. Discovered
+    live (Deploy & Harden Phase 5 close-out): before this variable
+    existed, the only place a real config lived was the gitignored
+    frontend/static/firebase-config.js, which never made it into any
+    container image — so control-tower-ui's live Firebase auth was
+    silently unconfigured despite a real project already being set up.
+  EOT
+}
+
 # -- Cloud SQL (Deploy & Harden Phase 3): gated, not automatic ----------
 
 variable "enable_cloud_sql" {

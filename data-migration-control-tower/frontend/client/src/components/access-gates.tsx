@@ -185,7 +185,10 @@ export function AuthenticationGate({
         ) : (
           <div class="inline-alert warning" role="status">
             Firebase authentication is not configured. Set{" "}
-            <code>FIREBASE_WEB_CONFIG_JSON</code> on this service.
+            <code>FIREBASE_API_KEY</code>, <code>FIREBASE_AUTH_DOMAIN</code>,{" "}
+            <code>FIREBASE_PROJECT_ID</code> and <code>FIREBASE_APP_ID</code> (plus{" "}
+            <code>FIREBASE_STORAGE_BUCKET</code>/<code>FIREBASE_MESSAGING_SENDER_ID</code> for
+            full functionality) on this service.
           </div>
         )}
         <p class="auth-footnote">

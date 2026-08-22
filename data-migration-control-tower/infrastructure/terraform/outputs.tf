@@ -21,3 +21,8 @@ output "cloud_run_service_urls" {
 output "cloud_sql_connection_name" {
   value = var.enable_cloud_sql ? google_sql_database_instance.postgres_retail_exec[0].connection_name : null
 }
+
+output "cloud_sql_private_ip_address" {
+  value       = var.enable_cloud_sql ? google_sql_database_instance.postgres_retail_exec[0].private_ip_address : null
+  description = "The value tools/data_plane_job/run_job.py's PostgresAdapter needs as connection_profile.host on the postgres_retail_exec_v1 pack's estate binding — set post-apply, same manual-step reasoning as SERVICE_AUDIENCE (README.md's post-deploy checklist)."
+}

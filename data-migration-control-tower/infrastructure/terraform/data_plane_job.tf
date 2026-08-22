@@ -78,6 +78,26 @@ resource "google_cloud_run_v2_job" "data_plane" {
       containers {
         image = var.data_plane_job_image_tag # deliberately no default, same reasoning as service_image_tags
       }
+
+      # Direct VPC egress (network.tf) — needed only when this job's
+      # actual target is the Cloud SQL demo source: PostgresAdapter
+      # connects via raw `psycopg.connect(host=...)` (tools/adapters/postgres_adapter.py),
+      # not the Cloud SQL Python Connector, so it needs a real network
+      # route to Cloud SQL's private IP, not just Cloud SQL Admin API
+      # access (which roles/cloudsql.client alone would grant).
+      # PRIVATE_RANGES_ONLY keeps this job's Firestore/Pub/Sub/BigQuery
+      # calls on the public internet path instead of forcing all
+      # egress through the VPC.
+      dynamic "vpc_access" {
+        for_each = var.enable_cloud_sql ? [1] : []
+        content {
+          network_interfaces {
+            network    = data.google_compute_network.default[0].id
+            subnetwork = data.google_compute_subnetwork.default[0].id
+          }
+          egress = "PRIVATE_RANGES_ONLY"
+        }
+      }
     }
   }
 }

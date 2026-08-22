@@ -23,6 +23,13 @@ locals {
     "iamcredentials.googleapis.com",
     "cloudbilling.googleapis.com",
     "billingbudgets.googleapis.com",
+    # Deploy & Harden Phase 3 close-out: Cloud SQL's private-IP-only
+    # design (cloud_sql.tf's own header) needs Private Services Access
+    # (a VPC peering connection to Google's service producer network)
+    # plus Direct VPC egress on the data-plane job that reaches it —
+    # both need these two APIs enabled first.
+    "compute.googleapis.com",
+    "servicenetworking.googleapis.com",
   ]
 }
 

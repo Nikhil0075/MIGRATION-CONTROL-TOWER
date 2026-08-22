@@ -88,6 +88,27 @@ resource "google_cloud_run_v2_service" "service" {
         name  = "ALLOWED_CALLER_SERVICE_ACCOUNTS"
         value = join(",", [for k in each.value.allowed_callers : local.service_account_email_by_key[k]])
       }
+
+      # Firebase Web SDK config — control-tower-ui only, and only when
+      # var.firebase_web_config is actually supplied (see its own
+      # description for why this isn't a secret and why there's no
+      # default). Discovered live (Deploy & Harden Phase 5 close-out):
+      # without this, the deployed console shows "Firebase
+      # authentication is not configured" with no way to sign in.
+      dynamic "env" {
+        for_each = each.key == "control-tower-ui" && var.firebase_web_config != null ? {
+          FIREBASE_API_KEY             = var.firebase_web_config.api_key
+          FIREBASE_AUTH_DOMAIN         = var.firebase_web_config.auth_domain
+          FIREBASE_PROJECT_ID          = var.firebase_web_config.project_id
+          FIREBASE_STORAGE_BUCKET      = var.firebase_web_config.storage_bucket
+          FIREBASE_MESSAGING_SENDER_ID = var.firebase_web_config.messaging_sender_id
+          FIREBASE_APP_ID              = var.firebase_web_config.app_id
+        } : {}
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
       # SERVICE_AUDIENCE intentionally NOT set here — it would need this
       # service's own URL, which Terraform cannot reference from within
       # the same resource's own config. Set it in a follow-up
@@ -116,6 +137,19 @@ resource "google_cloud_run_v2_service_iam_member" "public_frontend" {
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
+
+# GOTCHA discovered live (Deploy & Harden Phase 5 close-out): a
+# `terraform apply -replace=...` on google_cloud_run_v2_service.service["control-tower-ui"]
+# destroys and recreates the service — which wipes its IAM policy on GCP's
+# side — but this iam_member resource's own attributes never change (it
+# targets the service by its stable *name*, not an internal ID), so
+# Terraform sees "no changes needed" and does NOT reapply it. The result:
+# a `-replace` on the frontend service silently makes the whole console
+# 403 for every visitor until this binding is reapplied by hand or via
+# its own `-replace`. If you ever `-replace` control-tower-ui again,
+# `-replace` this resource in the SAME apply, or immediately run:
+#   gcloud run services add-iam-policy-binding control-tower-ui \
+#     --member=allUsers --role=roles/run.invoker --region=REGION
 
 # run.invoker for every explicitly-allowed caller — no service is
 # invokable by an identity not named in local.services[*].allowed_callers.
