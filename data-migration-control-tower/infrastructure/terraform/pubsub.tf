@@ -85,21 +85,37 @@ resource "google_pubsub_subscription" "dead_letter_sub" {
 #    dependency ordering (service URL -> push endpoint) automatically. --
 
 locals {
-  # push subscription name -> {topic, path on the owning service}
+  # push subscription name -> {topic, path on the owning service}.
+  #
+  # Every path below ends in a trailing slash — discovered live (Deploy
+  # & Harden Phase 5 close-out): agents/orchestrator/service_main.py
+  # (and the discovery/cutover equivalents) each `app.mount("/push/NAME",
+  # sub_app)` a sub-app whose own route is registered at "/". Starlette's
+  # default `redirect_slashes=True` means a request to the BARE mount
+  # path (no trailing slash) 307-redirects to add one, before any
+  # handler or auth code ever runs. Pub/Sub's push delivery does not
+  # follow redirects, so every single delivery to a path missing the
+  # trailing slash failed silently forever — no error surfaced anywhere
+  # except a 307 in the Cloud Run request log, Pub/Sub just kept
+  # redelivering (and redelivering, and redelivering) until
+  # max_delivery_attempts. Confirmed locally with FastAPI's TestClient
+  # before touching the live config: POST /push/migration -> 307;
+  # POST /push/migration/ -> reaches the real auth check. Every one of
+  # these 10 paths had the same bug, not just this one.
   push_targets = {
-    "migration-requested-push"  = { topic = "migration.requested", service = "orchestrator", path = "/push/migration" }
-    "discovery-completed-push"  = { topic = "discovery.completed", service = "orchestrator", path = "/push/discovery" }
-    "risk-assessed-push"        = { topic = "risk.assessed", service = "orchestrator", path = "/push/risk" }
-    "plan-created-push"         = { topic = "plan.created", service = "orchestrator", path = "/push/plan" }
-    "validation-requested-push" = { topic = "validation.requested", service = "orchestrator", path = "/push/validation" }
-    "validation-passed-push"    = { topic = "validation.passed", service = "orchestrator", path = "/push/approval" }
-    "validation-failed-push"    = { topic = "validation.failed", service = "orchestrator", path = "/push/recovery" }
-    "assessment-requested-push" = { topic = "assessment.requested", service = "discovery-agent", path = "/push/assessment" }
-    "cutover-approved-push"     = { topic = "cutover.approved", service = "cutover-agent", path = "/push/cutover" }
+    "migration-requested-push"  = { topic = "migration.requested", service = "orchestrator", path = "/push/migration/" }
+    "discovery-completed-push"  = { topic = "discovery.completed", service = "orchestrator", path = "/push/discovery/" }
+    "risk-assessed-push"        = { topic = "risk.assessed", service = "orchestrator", path = "/push/risk/" }
+    "plan-created-push"         = { topic = "plan.created", service = "orchestrator", path = "/push/plan/" }
+    "validation-requested-push" = { topic = "validation.requested", service = "orchestrator", path = "/push/validation/" }
+    "validation-passed-push"    = { topic = "validation.passed", service = "orchestrator", path = "/push/approval/" }
+    "validation-failed-push"    = { topic = "validation.failed", service = "orchestrator", path = "/push/recovery/" }
+    "assessment-requested-push" = { topic = "assessment.requested", service = "discovery-agent", path = "/push/assessment/" }
+    "cutover-approved-push"     = { topic = "cutover.approved", service = "cutover-agent", path = "/push/cutover/" }
     # Deploy & Harden Phase 3 (docs/adr/0003) — the async data-plane
     # job's completion event, owned by the orchestrator like its other
     # 6 state-machine-step consumers.
-    "migration-completed-push"  = { topic = "migration.completed", service = "orchestrator", path = "/push/migrationcompleted" }
+    "migration-completed-push"  = { topic = "migration.completed", service = "orchestrator", path = "/push/migrationcompleted/" }
   }
 }
 
@@ -116,6 +132,22 @@ resource "google_pubsub_subscription" "push" {
     push_endpoint = "${google_cloud_run_v2_service.service[each.value.service].uri}${each.value.path}"
     oidc_token {
       service_account_email = google_service_account.pubsub_invoker.email
+      # Explicit, not defaulted — discovered live (Deploy & Harden Phase
+      # 5 close-out), the second bug this same investigation found.
+      # Left unset, GCP defaults the OIDC token's `aud` claim to the
+      # full push_endpoint (including this route's own path), which
+      # tools/capability_http_server.py::verify_caller_identity() then
+      # checks via id_token.verify_oauth2_token(..., audience=SERVICE_AUDIENCE).
+      # A single Cloud Run service (the orchestrator) owns 8 different
+      # push routes, but SERVICE_AUDIENCE is ONE env var for the whole
+      # service — it cannot equal 8 different per-route URLs at once, so
+      # every route but whichever one happened to match failed OIDC
+      # verification with 401. Pinning every route on one service to
+      # that service's own base URI (matching README.md's post-deploy
+      # SERVICE_AUDIENCE step, which must use this SAME uri value, not
+      # any other valid-but-differently-formatted Cloud Run hostname
+      # alias) fixes this for all of them at once.
+      audience = google_cloud_run_v2_service.service[each.value.service].uri
     }
   }
 

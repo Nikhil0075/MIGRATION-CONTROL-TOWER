@@ -62,9 +62,18 @@ apply blindly.
    again — this is the step that creates real, billed, running services. Review the plan
    specifically for `google_cloud_run_v2_service` and `google_pubsub_subscription.push` before
    applying.
-4. Per-service `gcloud run services update <name> --update-env-vars SERVICE_AUDIENCE=$(gcloud run
-   services describe <name> --format='value(status.url)')` — see `cloud_run.tf`'s comment on why
-   this can't be done inside the same `apply` that creates the service.
+4. Per-service `gcloud run services update <name> --update-env-vars SERVICE_AUDIENCE=$(terraform
+   output -json cloud_run_service_urls | jq -r '.["<name>"]')` — see `cloud_run.tf`'s comment on
+   why this can't be done inside the same `apply` that creates the service. **Use terraform's own
+   `.uri` value here, not `gcloud run services describe --format='value(status.url)'`** — Cloud Run
+   exposes more than one valid hostname alias for the same service (confirmed live: the two return
+   genuinely different strings for the identical service), and `pubsub.tf`'s `oidc_token.audience`
+   is pinned to terraform's `.uri` value specifically. A SERVICE_AUDIENCE set from the other alias
+   silently fails every OIDC check with 401 — every Pub/Sub push delivery to that service redelivers
+   forever, exactly like the trailing-slash bug this same paragraph's neighbor describes. Both were
+   found live, together, in the same investigation (Deploy & Harden Phase 5 close-out) — a
+   `migration.requested` publish that should have created one run in seconds instead created a new
+   run every ~15s for several minutes before landing in the dead-letter topic.
 5. Only once a Postgres pricing tier is confirmed (Phase 3b's checkpoint): `enable_cloud_sql = true`.
    Then apply the read-only-user SQL migration referenced in `cloud_sql.tf`'s comment (Cloud SQL's
    own user resource has no built-in read-only role — the actual `REVOKE`/`GRANT SELECT` statements

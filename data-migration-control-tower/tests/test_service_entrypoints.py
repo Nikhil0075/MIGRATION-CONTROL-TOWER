@@ -77,3 +77,62 @@ def test_orchestrator_does_not_own_assessment_or_cutover_consumers():
     routes = {r.path for r in module.app.routes}
     assert not any(r.startswith("/push/assessment") for r in routes)
     assert not any(r.startswith("/push/cutover") for r in routes)
+
+
+#: Every consumer mount path this fleet actually has, per each
+#: service_main.py's own `app.mount(f"/push/{name}", ...)`. Matches
+#: infrastructure/terraform/pubsub.tf's push_targets map — kept in sync
+#: by hand (that file's own comment explains why the trailing slash on
+#: every path there is load-bearing, not cosmetic).
+_ALL_PUSH_MOUNTS = [
+    ("agents.orchestrator.service_main", "/push/migration/"),
+    ("agents.orchestrator.service_main", "/push/discovery/"),
+    ("agents.orchestrator.service_main", "/push/risk/"),
+    ("agents.orchestrator.service_main", "/push/plan/"),
+    ("agents.orchestrator.service_main", "/push/validation/"),
+    ("agents.orchestrator.service_main", "/push/approval/"),
+    ("agents.orchestrator.service_main", "/push/recovery/"),
+    ("agents.orchestrator.service_main", "/push/migrationcompleted/"),
+    ("agents.discovery.service_main", "/push/assessment/"),
+    ("agents.cutover.service_main", "/push/cutover/"),
+]
+
+
+@pytest.mark.parametrize("module_path,mount_path", _ALL_PUSH_MOUNTS)
+def test_push_mount_bare_path_redirects_but_trailing_slash_does_not(module_path, mount_path):
+    """Regression test for a real bug found live (Deploy & Harden Phase 5
+    close-out): `app.mount(f"/push/{name}", sub_app)` where sub_app has a
+    route at "/" makes Starlette 307-redirect a POST to the BARE mount
+    path (no trailing slash) before any handler or auth code runs. Every
+    push subscription in pubsub.tf's push_targets was pointed at the bare
+    path — every single live delivery attempt failed silently forever
+    (Pub/Sub does not follow redirects), which
+    tests/test_service_entrypoints.py's existing route-table checks
+    never caught, since they never actually issue a request.
+
+    This asserts BOTH halves: the bare path really does redirect (so this
+    test documents the trap rather than silently stops testing for it if
+    Starlette's default ever changes) and the trailing-slash path — the
+    one pubsub.tf actually targets now — does not.
+    """
+    import importlib
+
+    from fastapi.testclient import TestClient
+
+    module = importlib.import_module(module_path)
+    client = TestClient(module.app, follow_redirects=False)
+
+    bare_path = mount_path.rstrip("/")
+    bare_response = client.post(bare_path, json={})
+    assert bare_response.status_code == 307, (
+        f"{module_path}{bare_path} no longer redirects — if Starlette's mount "
+        "behavior changed, the trailing slash in pubsub.tf's push_targets may "
+        "no longer be necessary, but verify before removing it"
+    )
+
+    real_response = client.post(mount_path, json={})
+    assert real_response.status_code != 307, (
+        f"{module_path}{mount_path} — the exact path pubsub.tf's push subscription "
+        "targets — redirects. Every live Pub/Sub push delivery to this consumer "
+        "would fail silently and retry forever."
+    )

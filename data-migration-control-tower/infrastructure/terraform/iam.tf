@@ -75,6 +75,20 @@ resource "google_project_iam_member" "agent_pubsub_publisher" {
   member  = "serviceAccount:${google_service_account.agent[each.value].email}"
 }
 
+# Discovered live (Deploy & Harden Phase 5 close-out): no agent SA had
+# this at all, so every deployed service's tools/tracing.py span export
+# failed with a 403 on every single request — not a propagation gap
+# (docs/EVALUATION.md's already-known caveat about traceparent wiring),
+# a total absence of write access. Baseline, same as datastore/pubsub
+# above, since every service exports spans.
+resource "google_project_iam_member" "agent_cloudtrace_agent" {
+  for_each = toset(var.agent_service_account_ids)
+
+  project = var.project_id
+  role    = "roles/cloudtrace.agent"
+  member  = "serviceAccount:${google_service_account.agent[each.value].email}"
+}
+
 # sa-orchestrator additionally gets pubsub.subscriber + bigquery.dataEditor
 # + aiplatform.user (it consumes every topic and, pre-Phase-2c dynamic
 # import, transitively needs what discovery/validation need too).
