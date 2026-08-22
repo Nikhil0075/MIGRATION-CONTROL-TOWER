@@ -77,6 +77,24 @@ resource "google_cloud_run_v2_job" "data_plane" {
 
       containers {
         image = var.data_plane_job_image_tag # deliberately no default, same reasoning as service_image_tags
+
+        # Found missing live (2026-08-22): this job's own entrypoint
+        # (tools/data_plane_job/run_job.py) resolves its source secret
+        # via tools/secret_resolver.py and publishes migration.completed
+        # via tools/events.py -- both require GCP_PROJECT_ID to qualify
+        # a bare secret/topic reference into its full resource name, and
+        # nothing here ever set it. The first three real job executions
+        # this environment ever ran (once the orchestrator could finally
+        # reach run_job() at all -- see the two IAM fixes above) all
+        # failed inside the container itself with RuntimeError/
+        # SecretResolutionError before ever reading a row, each one
+        # correctly publishing its own migration.completed(status=FAILED)
+        # once GCP_PROJECT_ID... except the very first one didn't even
+        # get that far, since tools/events.py::publish() needs it too.
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.project_id
+        }
       }
 
       # Direct VPC egress (network.tf) — needed only when this job's
@@ -100,6 +118,33 @@ resource "google_cloud_run_v2_job" "data_plane" {
       }
     }
   }
+}
+
+# Found missing live (2026-08-22, two rounds): every IAM grant above
+# scopes what the JOB's own service account can do once running — none
+# of it grants the ORCHESTRATOR permission to actually start an
+# execution of the job in the first place. tools/data_plane_executors/
+# cloud_run_job_executor.py calls JobsClient.run_job() with
+# RunJobRequest.overrides (per-target RUN_ID/EXECUTION_ID/SOURCE_TABLE/
+# etc env var overrides) — that specific call needs run.jobs.
+# runWithOverrides, a materially different (and more sensitive, since
+# overrides can change what the job actually does) permission from the
+# plain run.jobs.run that roles/run.invoker alone grants. The first
+# round of this fix used run.invoker and still failed live with
+# PermissionDenied on runWithOverrides specifically; roles/run.developer
+# is the narrowest predefined role that includes it. Without either,
+# every real submission attempt failed at the API call — which,
+# combined with the pending_remote_executions counter already having
+# been written before the call, is exactly the scenario the "genuinely
+# submitted" check in handle_planned() (see its own comment) exists to
+# tell apart from a real duplicate-submission risk.
+resource "google_cloud_run_v2_job_iam_member" "orchestrator_runs_data_plane_job" {
+  count    = var.enable_data_plane_job ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_job.data_plane[0].name
+  role     = "roles/run.developer"
+  member   = "serviceAccount:${google_service_account.agent["sa-orchestrator"].email}"
 }
 
 # One-off schema/data/grants bootstrap (Deploy & Harden Phase 5 close-out
